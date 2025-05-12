@@ -35,34 +35,30 @@ public class UserController {
         this.userRepository = userRepository;
     }
 
-    /**
-     * Get current user profile
-     */
     @GetMapping("/profile")
-    public Mono<ResponseEntity<?>> getCurrentUserProfile(Authentication authentication) {
-        if (authentication == null) {
-            Map<String, String> errorResponse = new HashMap<>();
-            errorResponse.put("error", "No authentication found");
-            errorResponse.put("message", "User not authenticated");
-            return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(errorResponse));
-        }
+    public Mono<ResponseEntity<?>> getCurrentUserProfile() {
+        return ReactiveSecurityContextHolder.getContext()
+                .map(SecurityContext::getAuthentication)
+                .flatMap(authentication -> {
+                    try {
+                        String username = authentication.getName();
+                        System.out.println("Authentication principal: " + authentication.getPrincipal());
+                        System.out.println("Username from authentication: " + username);
+                        System.out.println("Authorities: " + authentication.getAuthorities());
 
-        try {
-            String username = authentication.getName();
-            System.out.println("Authentication principal: " + authentication.getPrincipal());
-            System.out.println("Username from authentication: " + username);
-            System.out.println("Authorities: " + authentication.getAuthorities());
-
-            UserDTO userDTO = userService.getUserByUsername(username);
-            return Mono.just(ResponseEntity.ok(userDTO));
-        } catch (Exception e) {
-            e.printStackTrace();
-            Map<String, String> errorResponse = new HashMap<>();
-            errorResponse.put("error", "Failed to retrieve user profile");
-            errorResponse.put("message", e.getMessage());
-            errorResponse.put("type", e.getClass().getName());
-            return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse));
-        }
+                        UserDTO userDTO = userService.getUserByUsername(username);
+                        return Mono.just(ResponseEntity.ok(userDTO));
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        Map<String, String> errorResponse = new HashMap<>();
+                        errorResponse.put("error", "Failed to retrieve user profile");
+                        errorResponse.put("message", e.getMessage());
+                        errorResponse.put("type", e.getClass().getName());
+                        return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse));
+                    }
+                })
+                .defaultIfEmpty(ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "No authentication found", "message", "User not authenticated")));
     }
 
     /**
