@@ -1,0 +1,19 @@
+server:
+  port: 8080
+
+spring:
+  main:
+    web-application-type: reactive
+  cloud:
+    vault:
+      enabled: true
+      token: hvs.iJ1XvMVEcVBMeLyC288R2VDJ
+      host: localhost
+      port: 8200
+      scheme: http
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"
