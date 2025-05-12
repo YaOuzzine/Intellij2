@@ -12,7 +12,7 @@ import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
-import java.util.Base64;
+import java.util.Base64; // Ensure this import is present
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -111,18 +111,24 @@ public class JwtUtil {
     private String calculateHmacSha256(String data, String key) {
         try {
             Mac sha256Hmac = Mac.getInstance("HmacSHA256");
-            // CRITICAL: Use consistent encoding
+            // CRITICAL: Use consistent encoding for the key
             SecretKeySpec secretKey = new SecretKeySpec(key.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
             sha256Hmac.init(secretKey);
-            // CRITICAL: Use consistent encoding
+            // CRITICAL: Use consistent encoding for the data to be signed
             byte[] signatureBytes = sha256Hmac.doFinal(data.getBytes(StandardCharsets.UTF_8));
-            return base64UrlEncode(new String(signatureBytes, StandardCharsets.UTF_8));
+
+            // ***** THIS IS THE CORRECTED LINE *****
+            // Directly Base64URL encode the raw signature bytes
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(signatureBytes);
+            // **************************************
+
         } catch (NoSuchAlgorithmException | InvalidKeyException e) {
             throw new RuntimeException("Error calculating HMAC: " + e.getMessage(), e);
         }
     }
 
-    // Also ensure the base64UrlEncode method is consistent:
+    // This method is for encoding STRING inputs (like JSON header/payload)
+    // and should remain as it was.
     private String base64UrlEncode(String input) {
         return Base64.getUrlEncoder().withoutPadding().encodeToString(input.getBytes(StandardCharsets.UTF_8));
     }

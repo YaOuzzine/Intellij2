@@ -6,6 +6,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.oauth2.jwt.NimbusReactiveJwtDecoder;
 import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
+import javax.crypto.spec.SecretKeySpec;
+import java.nio.charset.StandardCharsets;
 
 import java.security.KeyFactory;
 import java.security.interfaces.RSAPublicKey;
@@ -20,15 +22,8 @@ public class JwtDecoderConfig {
 
     @Bean
     public ReactiveJwtDecoder jwtDecoder() {
-        // For a temporary solution, we'll use a simple symmetric key
-        // This matches our simplified JwtUtil approach
-        return NimbusReactiveJwtDecoder.withSecretKey(
-                javax.crypto.spec.SecretKeySpec.class.cast(
-                        new javax.crypto.spec.SecretKeySpec(
-                                jwtSecret.getBytes(),
-                                "HmacSHA256"
-                        )
-                )
-        ).build();
+        byte[] secretBytes = jwtSecret.getBytes(StandardCharsets.UTF_8); // Specify UTF-8
+        SecretKeySpec secretKey = new SecretKeySpec(secretBytes, "HmacSHA256");
+        return NimbusReactiveJwtDecoder.withSecretKey(secretKey).build();
     }
 }
