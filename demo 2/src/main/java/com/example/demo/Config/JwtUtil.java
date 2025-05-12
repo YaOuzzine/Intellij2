@@ -108,18 +108,22 @@ public class JwtUtil {
         return json.toString();
     }
 
-    private String base64UrlEncode(String input) {
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(input.getBytes(StandardCharsets.UTF_8));
-    }
-
     private String calculateHmacSha256(String data, String key) {
         try {
             Mac sha256Hmac = Mac.getInstance("HmacSHA256");
+            // CRITICAL: Use consistent encoding
             SecretKeySpec secretKey = new SecretKeySpec(key.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
             sha256Hmac.init(secretKey);
-            return base64UrlEncode(new String(sha256Hmac.doFinal(data.getBytes(StandardCharsets.UTF_8))));
+            // CRITICAL: Use consistent encoding
+            byte[] signatureBytes = sha256Hmac.doFinal(data.getBytes(StandardCharsets.UTF_8));
+            return base64UrlEncode(new String(signatureBytes, StandardCharsets.UTF_8));
         } catch (NoSuchAlgorithmException | InvalidKeyException e) {
             throw new RuntimeException("Error calculating HMAC: " + e.getMessage(), e);
         }
+    }
+
+    // Also ensure the base64UrlEncode method is consistent:
+    private String base64UrlEncode(String input) {
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(input.getBytes(StandardCharsets.UTF_8));
     }
 }
