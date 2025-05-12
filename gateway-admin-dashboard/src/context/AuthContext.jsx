@@ -1,119 +1,55 @@
-// src/context/AuthContext.jsx
-import React, { createContext, useState, useEffect } from 'react';
-import axios from 'axios';
-import apiClient from '../apiClient';
+// gateway-admin-dashboard/src/context/AuthContext.jsx
+import React, { createContext, useState, useEffect, useCallback } from 'react';
+import apiClient from '../apiClient'; // Use the configured apiClient
 
 export const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
   const [user, setUser] = useState(null);
+  const [isLoading, setIsLoading] = useState(true); // Start with loading true
 
-  // Check if user is already authenticated on component mount
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    const userData = localStorage.getItem('userData');
-    
-    if (token) {
-      apiClient.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+  const fetchUserProfile = useCallback(async () => {
+    try {
+      const response = await apiClient.get('/user/profile'); // Endpoint in gateway-admin
+      setUser(response.data);
+      localStorage.setItem('userData', JSON.stringify(response.data));
       setIsAuthenticated(true);
-      
-      // If we have user data in localStorage, parse and use it
-      if (userData) {
-        try {
-          setUser(JSON.parse(userData));
-        } catch (error) {
-          console.error('Error parsing user data from localStorage', error);
-        }
-      } else {
-        // If we have a token but no user data, try to fetch the user profile
-        fetchUserProfile(token);
-      }
+    } catch (error) {
+      console.error('Failed to fetch user profile:', error);
+      // If fetching profile fails, token might be invalid
+      logout(); // Clear invalid state
     }
-    setIsLoading(false);
   }, []);
 
-  const fetchUserProfile = async (token) => {
-    try {
-      // In a real app, you would have an endpoint to fetch the user profile
-      // const response = await apiClient.get('/api/user/profile');
-      // const userData = response.data;
-      
-      // For now, we'll use hardcoded data
-      const userData = {
-        id: '123',
-        firstName: 'John',
-        lastName: 'Doe',
-        email: 'john.doe@example.com',
-        jobTitle: 'System Administrator',
-        department: 'IT Operations',
-        twoFactorEnabled: false,
-        sessionTimeout: 30,
-        notificationsEnabled: true
-      };
-      
-      setUser(userData);
-      localStorage.setItem('userData', JSON.stringify(userData));
-    } catch (error) {
-      console.error('Error fetching user profile', error);
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      apiClient.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      // Try to fetch user profile to validate token and get user data
+      fetchUserProfile().finally(() => setIsLoading(false));
+    } else {
+      setIsLoading(false); // No token, not loading
     }
-  };
+  }, [fetchUserProfile]);
 
   const login = async (username, password) => {
     try {
-      // Try both approaches - Basic auth and form submission
-      let response;
-      try {
-        // First try with Basic Auth
-        response = await axios.get("http://localhost:8081/api/auth/login", {
-          auth: {
-            username,
-            password,
-          },
-        });
-      } catch (err) {
-        // If that fails, try with form submission
-        const formData = new URLSearchParams();
-        formData.append('username', username);
-        formData.append('password', password);
-        
-        response = await axios.post("http://localhost:9080/login", formData, {
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-        });
-      }
-      
-      if (response.status === 200) {
-        // Store token if provided in the response
-        if (response.data.token) {
-          localStorage.setItem('token', response.data.token);
-          apiClient.defaults.headers.common['Authorization'] = `Bearer ${response.data.token}`;
-        }
-        
-        // For demo purposes, create a fake user object
-        const userData = {
-          id: '123',
-          firstName: 'John',
-          lastName: 'Doe',
-          email: 'john.doe@example.com',
-          jobTitle: 'System Administrator',
-          department: 'IT Operations',
-          twoFactorEnabled: false,
-          sessionTimeout: 30,
-          notificationsEnabled: true
-        };
-        
-        setUser(userData);
-        localStorage.setItem('userData', JSON.stringify(userData));
-        setIsAuthenticated(true);
+      // The login endpoint is on the gateway (demo 2), proxied by Vite
+      const response = await apiClient.post('/auth/login', { username, password });
+
+      if (response.data && response.data.token) {
+        const { token } = response.data;
+        localStorage.setItem('token', token);
+        apiClient.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+        await fetchUserProfile(); // Fetch profile after successful login
         return true;
       }
       return false;
-    } catch (err) {
-      console.error("Login failed:", err);
-      return false;
+    } catch (error) {
+      console.error("Login failed:", error.response?.data?.message || error.message);
+      throw error; // Re-throw to be caught by LoginPage
     }
   };
 
@@ -123,24 +59,26 @@ export const AuthProvider = ({ children }) => {
     delete apiClient.defaults.headers.common['Authorization'];
     setIsAuthenticated(false);
     setUser(null);
+    // Optionally redirect to login page
+    // window.location.href = '/login';
   };
 
-  const updateUserProfile = (updatedProfile) => {
-    const updatedUser = { ...user, ...updatedProfile };
-    setUser(updatedUser);
-    localStorage.setItem('userData', JSON.stringify(updatedUser));
+  const updateUserContextProfile = (updatedProfileData) => {
+    setUser(prevUser => ({ ...prevUser, ...updatedProfileData }));
+    localStorage.setItem('userData', JSON.stringify({ ...user, ...updatedProfileData }));
   };
+
 
   return (
-    <AuthContext.Provider value={{ 
-      isAuthenticated, 
-      isLoading, 
-      login, 
-      logout, 
-      user, 
-      updateUserProfile 
-    }}>
-      {children}
-    </AuthContext.Provider>
+      <AuthContext.Provider value={{
+        isAuthenticated,
+        user,
+        login,
+        logout,
+        isLoading,
+        updateUserProfile: updateUserContextProfile // Renamed for clarity
+      }}>
+        {children}
+      </AuthContext.Provider>
   );
 };

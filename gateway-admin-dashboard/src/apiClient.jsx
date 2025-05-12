@@ -1,62 +1,40 @@
-// src/apiClient.js
+// gateway-admin-dashboard/src/apiClient.jsx
 import axios from 'axios';
 
 const apiClient = axios.create({
-  baseURL: '/api', // Will use Vite's proxy configuration
-  headers: {
-    'Content-Type': 'application/json',
-  },
+    baseURL: import.meta.env.VITE_API_BASE_URL || '/api', // Use Vite proxy
 });
 
-// Add request interceptor to include token
 apiClient.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error) => Promise.reject(error)
+    (config) => {
+        const token = localStorage.getItem('token');
+        if (token) {
+            config.headers.Authorization = `Bearer ${token}`;
+        }
+        return config;
+    },
+    (error) => Promise.reject(error)
 );
 
-// Add response interceptor for token expiration
 apiClient.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response) {
-      // Handle token expiration
-      if (error.response.status === 401) {
-        // Token expired, log out user
-        localStorage.removeItem('token');
-        localStorage.removeItem('userData');
-        window.location.href = '/login';
-      }
-      
-      // Handle server validation errors
-      if (error.response.status === 422) {
-        return Promise.reject({
-          ...error,
-          isValidationError: true,
-          validationErrors: error.response.data.errors || {}
-        });
-      }
+    (response) => response,
+    async (error) => {
+        const originalRequest = error.config;
+        if (error.response?.status === 401 && !originalRequest._retry) {
+            originalRequest._retry = true;
+            // Here you could implement token refresh logic if you have a refresh token
+            // For now, we'll just log out
+            console.warn('Token expired or invalid, logging out.');
+            localStorage.removeItem('token');
+            localStorage.removeItem('userData');
+            // Redirect to login page, ensuring it's done outside of React's render cycle
+            // if not already on login page
+            if (window.location.pathname !== '/login') {
+                window.location.href = '/login';
+            }
+        }
+        return Promise.reject(error);
     }
-    return Promise.reject(error);
-  }
 );
-
-// Add user-related API endpoints
-apiClient.user = {
-  getProfile: () => apiClient.get('/user/profile'),
-  updateProfile: (data) => apiClient.put('/user/profile', data),
-  updatePassword: (data) => apiClient.put('/user/password', data),
-  updateSecurity: (data) => apiClient.put('/user/security', data),
-  uploadAvatar: (formData) => apiClient.post('/user/avatar', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data'
-    }
-  })
-};
 
 export default apiClient;

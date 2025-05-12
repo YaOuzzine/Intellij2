@@ -1,3 +1,4 @@
+// gateway-admin/src/main/java/com/example/gateway_admin/Entities/User.java
 package com.example.gateway_admin.Entities;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -7,9 +8,6 @@ import lombok.Setter;
 
 import java.time.LocalDateTime;
 
-/**
- * Represents a user in the system.
- */
 @Getter
 @Setter
 @Entity
@@ -49,13 +47,19 @@ public class User {
     private Boolean twoFactorEnabled = false;
 
     @Column(name = "session_timeout_minutes")
-    private Integer sessionTimeoutMinutes = 30;
+    private Integer sessionTimeoutMinutes = 30; // Default 30 minutes
 
     @Column(name = "notifications_enabled")
     private Boolean notificationsEnabled = true;
 
     @Column(name = "is_active")
     private boolean active = true;
+
+    @Column(name = "failed_login_attempts")
+    private int failedLoginAttempts = 0;
+
+    @Column(name = "account_locked_until")
+    private LocalDateTime accountLockedUntil;
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;
@@ -66,15 +70,14 @@ public class User {
     @Column(name = "last_login_at")
     private LocalDateTime lastLoginAt;
 
-    // Role-based authorization
     @Column(nullable = false)
-    private String role = "USER"; // Default role: USER or ADMIN
+    private String role = "USER"; // Default role: USER, other: ADMIN
 
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();
         updatedAt = LocalDateTime.now();
-        active = true;
+        active = true; // Ensure user is active on creation
     }
 
     @PreUpdate
@@ -82,30 +85,23 @@ public class User {
         updatedAt = LocalDateTime.now();
     }
 
-    /**
-     * Check if user has administrator privileges
-     * @return true if user is an administrator
-     */
     @Transient
     public boolean isAdmin() {
-        return "ADMIN".equals(this.role);
+        return "ADMIN".equalsIgnoreCase(this.role);
     }
 
-    /**
-     * Get user's full name
-     * @return formatted full name
-     */
     @Transient
     public String getFullName() {
         return firstName + " " + lastName;
     }
 
-    /**
-     * Get user status as string
-     * @return "Active" or "Disabled"
-     */
     @Transient
     public String getStatus() {
         return active ? "Active" : "Disabled";
+    }
+
+    @Transient
+    public boolean isAccountLocked() {
+        return accountLockedUntil != null && accountLockedUntil.isAfter(LocalDateTime.now());
     }
 }
