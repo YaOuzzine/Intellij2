@@ -46,11 +46,12 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .authorizeExchange(exchanges -> exchanges
                         .pathMatchers("/api/auth/**").permitAll() // Should not be relevant for gateway-admin, but good practice
-                        .pathMatchers("/api/gateway-routes/**").hasAuthority("SCOPE_ADMIN")
-                        .pathMatchers("/api/ip-addresses/**").hasAuthority("SCOPE_ADMIN")
-                        .pathMatchers("/api/rate-limit/**").hasAuthority("SCOPE_ADMIN")
+                        // Change here: accept any authenticated user for user profile
                         .pathMatchers("/api/user/profile").authenticated()
-                        .pathMatchers("/api/user/**").hasAuthority("SCOPE_ADMIN")
+                        .pathMatchers("/api/gateway-routes/**").authenticated() // Changed from hasAuthority
+                        .pathMatchers("/api/ip-addresses/**").authenticated() // Changed from hasAuthority
+                        .pathMatchers("/api/rate-limit/**").authenticated() // Changed from hasAuthority
+                        .pathMatchers("/api/user/**").authenticated() // Changed from hasAuthority
                         .anyExchange().authenticated()
                 )
                 .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtDecoder(jwtDecoder())));

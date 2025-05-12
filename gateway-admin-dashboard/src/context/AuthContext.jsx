@@ -9,9 +9,23 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true); // Start with loading true
 
+  // gateway-admin-dashboard/src/context/AuthContext.jsx
   const fetchUserProfile = useCallback(async () => {
     try {
-      const response = await apiClient.get('/user/profile'); // Endpoint in gateway-admin
+      // Make sure the token is properly set before making this request
+      const token = localStorage.getItem('token');
+
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+
+      // Explicitly set the header for this request
+      const response = await apiClient.get('/user/profile', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
       setUser(response.data);
       localStorage.setItem('userData', JSON.stringify(response.data));
       setIsAuthenticated(true);
@@ -34,16 +48,16 @@ export const AuthProvider = ({ children }) => {
     }
   }, [fetchUserProfile]);
 
+  // gateway-admin-dashboard/src/context/AuthContext.jsx - Line ~40
   const login = async (username, password) => {
     try {
-      // The login endpoint is on the gateway (demo 2), proxied by Vite
       const response = await apiClient.post('/auth/login', { username, password });
 
       if (response.data && response.data.token) {
         const { token } = response.data;
         localStorage.setItem('token', token);
         apiClient.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-        await fetchUserProfile(); // Fetch profile after successful login
+        await fetchUserProfile();
         return true;
       }
       return false;
