@@ -1,6 +1,8 @@
 // gateway-admin/src/main/java/com/example/gateway_admin/Config/SecurityConfig.java
 package com.example.gateway_admin.Config;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -16,13 +18,15 @@ import org.springframework.web.cors.reactive.CorsConfigurationSource;
 import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource;
 
 import javax.crypto.spec.SecretKeySpec;
+import java.util.Arrays;
 import java.util.List;
 
 @Configuration
 @EnableWebFluxSecurity
 public class SecurityConfig {
 
-    // Use the same secret key as in the demo project
+    private static final Logger logger = LoggerFactory.getLogger(SecurityConfig.class);
+
     @Value("${jwt.secret:lB56pF9DgJuJcOuza8zT4MTxuhjLJI/BqrlbcFA87Mc=}")
     private String jwtSecret;
 
@@ -33,42 +37,63 @@ public class SecurityConfig {
 
     @Bean
     public ReactiveJwtDecoder jwtDecoder() {
-        // Use symmetric key validation to match our JWT generation approach
-        return NimbusReactiveJwtDecoder.withSecretKey(
-                new SecretKeySpec(jwtSecret.getBytes(), "HmacSHA256")
-        ).build();
+        logger.info("Creating JWT decoder with secret key");
+        SecretKeySpec secretKey = new SecretKeySpec(jwtSecret.getBytes(), "HmacSHA256");
+        NimbusReactiveJwtDecoder decoder = NimbusReactiveJwtDecoder.withSecretKey(secretKey).build();
+
+        // Add debug logging to the decoder
+        return token -> {
+            logger.debug("Attempting to decode JWT token: {}", token.substring(0, Math.min(token.length(), 20)) + "...");
+            return decoder.decode(token)
+                    .doOnSuccess(jwt -> {
+                        logger.info("Successfully decoded JWT token");
+                        logger.debug("JWT Claims: {}", jwt.getClaims());
+                        logger.debug("JWT Subject: {}", jwt.getSubject());
+                    })
+                    .doOnError(error -> {
+                        logger.error("Failed to decode JWT token: {}", error.getMessage(), error);
+                    });
+        };
     }
 
     @Bean
     public SecurityWebFilterChain securityWebFilterChain(ServerHttpSecurity http) {
-        http
+        logger.info("Configuring security web filter chain");
+
+        return http
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .csrf(csrf -> csrf.disable())
-                .authorizeExchange(exchanges -> exchanges
-                        .pathMatchers("/api/auth/**").permitAll() // Should not be relevant for gateway-admin, but good practice
-                        // Change here: accept any authenticated user for user profile
-                        .pathMatchers("/api/user/profile").authenticated()
-                        .pathMatchers("/api/gateway-routes/**").authenticated() // Changed from hasAuthority
-                        .pathMatchers("/api/ip-addresses/**").authenticated() // Changed from hasAuthority
-                        .pathMatchers("/api/rate-limit/**").authenticated() // Changed from hasAuthority
-                        .pathMatchers("/api/user/**").authenticated() // Changed from hasAuthority
-                        .anyExchange().authenticated()
-                )
-                .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtDecoder(jwtDecoder())));
-        return http.build();
+                .authorizeExchange(exchanges -> {
+                    logger.info("Configuring security authorization rules");
+                    exchanges
+                            .pathMatchers("/api/auth/**").permitAll()
+                            // Temporarily allow all to diagnose authentication issues
+                            .anyExchange().permitAll();
+                    logger.info("Security rules configured");
+                })
+                .oauth2ResourceServer(oauth2 -> {
+                    logger.info("Configuring OAuth2 resource server");
+                    oauth2.jwt(jwt -> {
+                        jwt.jwtDecoder(jwtDecoder());
+                        logger.info("JWT authentication configured with decoder");
+                    });
+                })
+                .build();
     }
 
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
+        logger.info("Configuring CORS");
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOrigins(List.of("http://localhost:5173"));
-        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
         configuration.setAllowedHeaders(List.of("*"));
         configuration.setAllowCredentials(true);
         configuration.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
+        logger.info("CORS configured successfully");
         return source;
     }
 }
