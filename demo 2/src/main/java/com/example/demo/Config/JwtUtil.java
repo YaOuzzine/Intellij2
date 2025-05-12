@@ -1,58 +1,45 @@
 // demo 2/src/main/java/com/example/demo/Config/JwtUtil.java
 package com.example.demo.Config;
 
-import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.SignatureAlgorithm;
-import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Component;
 
-import jakarta.annotation.PostConstruct;
-import java.security.Key;
-import java.security.KeyFactory;
-import java.security.interfaces.RSAPrivateKey;
-import java.security.interfaces.RSAPublicKey;
-import java.security.spec.PKCS8EncodedKeySpec;
-import java.security.spec.X509EncodedKeySpec;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.nio.charset.StandardCharsets;
+import java.security.InvalidKeyException;
+import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
+/**
+ * Simple JWT utility that doesn't rely on the JJWT library
+ * This is a temporary fix until the JJWT dependency issues are resolved
+ */
 @Component
 public class JwtUtil {
 
-    @Value("${jwt.rsa.private-key}")
-    private String privateKeyPem;
+    // Use a simple secret key for development
+    @Value("${jwt.secret:mysupersecretkey}")
+    private String secret;
 
-    @Value("${jwt.expiration-ms}")
+    @Value("${jwt.expiration-ms:3600000}")
     private long jwtExpirationMs;
 
-    @Value("${jwt.issuer}")
+    @Value("${jwt.issuer:my-app}")
     private String jwtIssuer;
 
-    private RSAPrivateKey rsaPrivateKey;
-
-    @PostConstruct
-    public void init() {
-        try {
-            String cleanedPem = privateKeyPem
-                    .replace("-----BEGIN RSA PRIVATE KEY-----", "")
-                    .replace("-----END RSA PRIVATE KEY-----", "")
-                    .replaceAll("\\s+", "");
-            byte[] decodedKey = Base64.getDecoder().decode(cleanedPem);
-            PKCS8EncodedKeySpec keySpec = new PKCS8EncodedKeySpec(decodedKey);
-            KeyFactory keyFactory = KeyFactory.getInstance("RSA");
-            rsaPrivateKey = (RSAPrivateKey) keyFactory.generatePrivate(keySpec);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to load RSA private key", e);
-        }
-    }
-
+    /**
+     * Generate a simple JWT token without relying on the JJWT library
+     */
     public String generateToken(Authentication authentication) {
         UserDetails userPrincipal = (UserDetails) authentication.getPrincipal();
         Date now = new Date();
@@ -62,13 +49,77 @@ public class JwtUtil {
                 .map(GrantedAuthority::getAuthority)
                 .collect(Collectors.toList());
 
-        return Jwts.builder()
-                .setSubject(userPrincipal.getUsername())
-                .claim("roles", roles)
-                .setIssuer(jwtIssuer)
-                .setIssuedAt(now)
-                .setExpiration(expiryDate)
-                .signWith(rsaPrivateKey, SignatureAlgorithm.RS256)
-                .compact();
+        // Create JWT header
+        Map<String, Object> header = new HashMap<>();
+        header.put("alg", "HS256");
+        header.put("typ", "JWT");
+        String encodedHeader = base64UrlEncode(toJson(header));
+
+        // Create JWT payload
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("sub", userPrincipal.getUsername());
+        payload.put("roles", roles);
+        payload.put("iss", jwtIssuer);
+        payload.put("iat", now.getTime() / 1000);
+        payload.put("exp", expiryDate.getTime() / 1000);
+        payload.put("jti", UUID.randomUUID().toString());
+        String encodedPayload = base64UrlEncode(toJson(payload));
+
+        // Create signature
+        String signature = calculateHmacSha256(encodedHeader + "." + encodedPayload, secret);
+
+        // Combine all parts to form the JWT
+        return encodedHeader + "." + encodedPayload + "." + signature;
+    }
+
+    private String toJson(Map<String, Object> map) {
+        StringBuilder json = new StringBuilder("{");
+        boolean first = true;
+        for (Map.Entry<String, Object> entry : map.entrySet()) {
+            if (!first) {
+                json.append(",");
+            }
+            first = false;
+            json.append("\"").append(entry.getKey()).append("\":");
+
+            if (entry.getValue() instanceof String) {
+                json.append("\"").append(entry.getValue()).append("\"");
+            } else if (entry.getValue() instanceof Number) {
+                json.append(entry.getValue());
+            } else if (entry.getValue() instanceof List) {
+                List<?> list = (List<?>) entry.getValue();
+                json.append("[");
+                boolean firstItem = true;
+                for (Object item : list) {
+                    if (!firstItem) json.append(",");
+                    firstItem = false;
+                    if (item instanceof String) {
+                        json.append("\"").append(item).append("\"");
+                    } else {
+                        json.append(item);
+                    }
+                }
+                json.append("]");
+            } else {
+                json.append(entry.getValue());
+            }
+        }
+        json.append("}");
+        return json.toString();
+    }
+
+    private String base64UrlEncode(String input) {
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(input.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private String calculateHmacSha256(String data, String key) {
+        try {
+            Mac sha256Hmac = Mac.getInstance("HmacSHA256");
+            SecretKeySpec secretKey = new SecretKeySpec(key.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
+            sha256Hmac.init(secretKey);
+            return base64UrlEncode(new String(sha256Hmac.doFinal(data.getBytes(StandardCharsets.UTF_8))));
+        } catch (NoSuchAlgorithmException | InvalidKeyException e) {
+            throw new RuntimeException("Error calculating HMAC: " + e.getMessage(), e);
+        }
     }
 }

@@ -79,6 +79,7 @@
 			<scope>provided</scope>
 		</dependency>
 
+		<!-- JWT Dependencies - Fixed configuration -->
 		<dependency>
 			<groupId>io.jsonwebtoken</groupId>
 			<artifactId>jjwt-api</artifactId>
@@ -88,18 +89,18 @@
 			<groupId>io.jsonwebtoken</groupId>
 			<artifactId>jjwt-impl</artifactId>
 			<version>0.11.5</version>
-<!--			<scope>runtime</scope>-->
+			<!-- Removed the runtime scope to ensure it's available during compilation and runtime -->
 		</dependency>
 		<dependency>
 			<groupId>io.jsonwebtoken</groupId>
-			<artifactId>jjwt-jackson</artifactId> <!-- or jjwt-gson -->
+			<artifactId>jjwt-jackson</artifactId>
 			<version>0.11.5</version>
-<!--			<scope>runtime</scope>-->
+			<!-- Removed the runtime scope to ensure it's available during compilation and runtime -->
 		</dependency>
 		<dependency>
 			<groupId>org.bouncycastle</groupId>
 			<artifactId>bcprov-jdk15on</artifactId>
-			<version>1.70</version> <!-- Ensure BouncyCastle is available for RSA -->
+			<version>1.70</version>
 		</dependency>
 	</dependencies>
 
