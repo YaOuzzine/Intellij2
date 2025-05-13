@@ -233,13 +233,25 @@ const SystemSettingsPage = () => {
   const loadUsers = async () => {
     if (!contextUser?.isAdmin) return;
 
+    console.log('SystemSettingsPage: Loading users for admin user', contextUser);
     setLoading(true);
     try {
-      const response = await apiClient.get('/user/all');
+      console.log('SystemSettingsPage: Making API request to /api/user/all');
+      const response = await apiClient.get('/api/user/all'); // Fixed: Added missing /api prefix
+      console.log('SystemSettingsPage: Received user data:', response.data);
       setUsers(response.data);
       setFilteredUsers(response.data);
     } catch (error) {
-      console.error('Error loading users:', error);
+      console.error('SystemSettingsPage: Error loading users:', error);
+      // Log detailed error information for debugging
+      if (error.response) {
+        console.error('SystemSettingsPage: Error response status:', error.response.status);
+        console.error('SystemSettingsPage: Error response data:', error.response.data);
+      } else if (error.request) {
+        console.error('SystemSettingsPage: No response received:', error.request);
+      } else {
+        console.error('SystemSettingsPage: Error message:', error.message);
+      }
       showNotification('Unable to load users', 'error');
     } finally {
       setLoading(false);
