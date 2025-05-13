@@ -57,6 +57,7 @@ const NavItem = styled(Box)(({ theme, active, highlight }) => ({
   }
 }));
 
+
 const NavIcon = styled(Box)(({ theme }) => ({
   display: 'flex',
   alignItems: 'center',
@@ -140,8 +141,8 @@ const DashboardLayout = () => {
                     open={item.id === highlightedNav}
                 >
                   <NavItem
-                      active={location.pathname === item.path}
-                      highlight={item.id === highlightedNav}
+                      active={location.pathname === item.path ? 1 : 0}
+                      highlight={item.id === highlightedNav ? 1 : 0}
                       onClick={() => handleNavClick(item.path)}
                   >
                     <NavIcon>

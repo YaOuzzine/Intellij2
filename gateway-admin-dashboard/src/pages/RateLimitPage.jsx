@@ -518,7 +518,7 @@ const RateLimitPage = () => {
             </StyledCard>
           </Grid>
 
-          {/* Status Distribution Pie Chart */}
+          {/* Status Distribution Pie Chart - FIXED VERSION */}
           <Grid item xs={12} md={4}>
             <StyledCard>
               <CardHeader
@@ -531,10 +531,10 @@ const RateLimitPage = () => {
                   <PieChart>
                     <Pie
                         data={[
-                          { name: 'Healthy', value: filteredRoutes.filter(r => getRouteStatus(r) === 'healthy').length, color: getStatusColor('healthy') },
-                          { name: 'Warning', value: filteredRoutes.filter(r => getRouteStatus(r) === 'warning').length, color: getStatusColor('warning') },
-                          { name: 'Critical', value: filteredRoutes.filter(r => getRouteStatus(r) === 'critical').length, color: getStatusColor('critical') },
-                          { name: 'Disabled', value: filteredRoutes.filter(r => getRouteStatus(r) === 'disabled').length, color: getStatusColor('disabled') }
+                          { name: 'Healthy', value: filteredRoutes.filter(r => getRouteStatus(r) === 'healthy').length, id: 'healthy' },
+                          { name: 'Warning', value: filteredRoutes.filter(r => getRouteStatus(r) === 'warning').length, id: 'warning' },
+                          { name: 'Critical', value: filteredRoutes.filter(r => getRouteStatus(r) === 'critical').length, id: 'critical' },
+                          { name: 'Disabled', value: filteredRoutes.filter(r => getRouteStatus(r) === 'disabled').length, id: 'disabled' }
                         ]}
                         cx="50%"
                         cy="50%"
@@ -543,18 +543,20 @@ const RateLimitPage = () => {
                         innerRadius={40}
                         paddingAngle={5}
                         dataKey="value"
+                        nameKey="id"
                         label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
                     >
-                      {['healthy', 'warning', 'critical', 'disabled'].map((status, index) => (
-                          <Cell key={`cell-${index}`} fill={getStatusColor(status)} />
+                      {[
+                        { status: 'healthy', key: 'cell-healthy' },
+                        { status: 'warning', key: 'cell-warning' },
+                        { status: 'critical', key: 'cell-critical' },
+                        { status: 'disabled', key: 'cell-disabled' }
+                      ].map(item => (
+                          <Cell key={item.key} fill={getStatusColor(item.status)} />
                       ))}
                     </Pie>
                     <RechartsTooltip
-                        formatter={(value, name, props) => [
-                          value,
-                          name,
-                          props.payload.payload.color
-                        ]}
+                        formatter={(value, name, props) => [value, props.payload.name]}
                         contentStyle={{
                           backgroundColor: chartTheme.tooltipBg,
                           border: 'none',
