@@ -72,29 +72,36 @@ public class UserController {
     }
 
     /**
-     * Update user profile information
+     * Update user profile information - CONVERTED TO REACTIVE
      */
     @PutMapping("/profile")
-    public ResponseEntity<?> updateProfile(@Valid @RequestBody UserProfileRequest request) {
-        try {
-            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-            if (auth == null) {
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                        .body(Map.of("error", "Authentication required"));
-            }
+    public Mono<ResponseEntity<?>> updateProfile(@Valid @RequestBody UserProfileRequest request) {
+        logger.info("Received PUT request to /api/user/profile");
+        return ReactiveSecurityContextHolder.getContext()
+                .map(SecurityContext::getAuthentication)
+                .flatMap(authentication -> {
+                    try {
+                        logger.info("Authentication found in PUT: {}", authentication);
+                        logger.info("Username from authentication in PUT: {}", authentication.getName());
+                        logger.info("Authorities in PUT: {}", authentication.getAuthorities());
 
-            String username = auth.getName();
-            logger.info("Updating profile for user: {}", username);
+                        String username = authentication.getName();
+                        logger.info("Updating profile for user: {}", username);
 
-            UserDTO updatedUser = userService.updateUserProfile(username, request);
-            return ResponseEntity.ok(updatedUser);
-        } catch (Exception e) {
-            logger.error("Error updating user profile: {}", e.getMessage(), e);
-            Map<String, String> errorResponse = new HashMap<>();
-            errorResponse.put("error", "Failed to update user profile");
-            errorResponse.put("message", e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
-        }
+                        UserDTO updatedUser = userService.updateUserProfile(username, request);
+                        logger.info("Profile successfully updated for user: {}", username);
+                        return Mono.just(ResponseEntity.ok(updatedUser));
+                    } catch (Exception e) {
+                        logger.error("Error updating user profile: {}", e.getMessage(), e);
+                        Map<String, String> errorResponse = new HashMap<>();
+                        errorResponse.put("error", "Failed to update user profile");
+                        errorResponse.put("message", e.getMessage());
+                        return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse));
+                    }
+                })
+                .doOnError(e -> logger.error("Error processing authentication context in PUT: {}", e.getMessage(), e))
+                .defaultIfEmpty(ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "Authentication required")));
     }
 
     /**
@@ -245,46 +252,58 @@ public class UserController {
     }
 
     /**
-     * Create new user (Admin only)
+     * Create new user (Admin only) - CONVERTED TO REACTIVE
      */
     @PostMapping
-    public ResponseEntity<?> createUser(@Valid @RequestBody CreateUserRequest request) {
-        try {
-            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-            if (auth == null) {
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                        .body(Map.of("error", "Authentication required"));
-            }
+    public Mono<ResponseEntity<?>> createUser(@Valid @RequestBody CreateUserRequest request) {
+        logger.info("Received POST request to /api/user to create a new user");
+        return ReactiveSecurityContextHolder.getContext()
+                .map(SecurityContext::getAuthentication)
+                .flatMap(auth -> {
+                    try {
+                        logger.info("Authentication found in createUser: {}", auth);
+                        logger.info("Username from authentication in createUser: {}", auth.getName());
+                        logger.info("Authorities in createUser: {}", auth.getAuthorities());
 
-            // Check if user has admin role
-            if (!hasAdminRole(auth)) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                        .body(Map.of("error", "Access denied", "message", "Admin role required"));
-            }
+                        // Check if user has admin role
+                        boolean isAdmin = auth.getAuthorities().stream()
+                                .anyMatch(a -> a.getAuthority().equals("SCOPE_ADMIN") ||
+                                        a.getAuthority().equals("ADMIN"));
 
-            UserDTO newUser = userService.createUser(
-                    request.getUsername(),
-                    request.getPassword(),
-                    request.getFirstName(),
-                    request.getLastName(),
-                    request.getEmail(),
-                    request.getRole()
-            );
+                        if (!isAdmin) {
+                            logger.warn("Access denied for user {} - admin role required", auth.getName());
+                            return Mono.just(ResponseEntity.status(HttpStatus.FORBIDDEN)
+                                    .body(Map.of("error", "Access denied", "message", "Admin role required")));
+                        }
 
-            return ResponseEntity.status(HttpStatus.CREATED).body(newUser);
-        } catch (IllegalArgumentException e) {
-            logger.warn("User creation failed: {}", e.getMessage());
-            Map<String, String> errorResponse = new HashMap<>();
-            errorResponse.put("error", "Invalid user data");
-            errorResponse.put("message", e.getMessage());
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
-        } catch (Exception e) {
-            logger.error("Error creating user: {}", e.getMessage(), e);
-            Map<String, String> errorResponse = new HashMap<>();
-            errorResponse.put("error", "Failed to create user");
-            errorResponse.put("message", e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
-        }
+                        UserDTO newUser = userService.createUser(
+                                request.getUsername(),
+                                request.getPassword(),
+                                request.getFirstName(),
+                                request.getLastName(),
+                                request.getEmail(),
+                                request.getRole()
+                        );
+
+                        logger.info("User created successfully: {}", newUser.getUsername());
+                        return Mono.just(ResponseEntity.status(HttpStatus.CREATED).body(newUser));
+                    } catch (IllegalArgumentException e) {
+                        logger.warn("User creation failed: {}", e.getMessage());
+                        Map<String, String> errorResponse = new HashMap<>();
+                        errorResponse.put("error", "Invalid user data");
+                        errorResponse.put("message", e.getMessage());
+                        return Mono.just(ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse));
+                    } catch (Exception e) {
+                        logger.error("Error creating user: {}", e.getMessage(), e);
+                        Map<String, String> errorResponse = new HashMap<>();
+                        errorResponse.put("error", "Failed to create user");
+                        errorResponse.put("message", e.getMessage());
+                        return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse));
+                    }
+                })
+                .doOnError(e -> logger.error("Error processing authentication context in createUser: {}", e.getMessage(), e))
+                .defaultIfEmpty(ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "Authentication required")));
     }
 
     /**
