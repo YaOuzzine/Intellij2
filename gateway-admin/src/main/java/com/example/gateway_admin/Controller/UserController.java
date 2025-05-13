@@ -177,40 +177,42 @@ public class UserController {
     }
 
     /**
-     * Get all users (Admin only)
+     * Get all users (Admin only) - FIXED to be fully reactive
      */
     @GetMapping("/all")
-    public ResponseEntity<?> getAllUsers() {
-        try {
-            // Get the authentication context from the SecurityContextHolder
-            Authentication auth = ReactiveSecurityContextHolder.getContext()
-                    .map(SecurityContext::getAuthentication)
-                    .block(); // Use block() to get the authentication from the Mono
+    public Mono<ResponseEntity<?>> getAllUsers() {
+        logger.info("Received request to get all users");
 
-            if (auth == null) {
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                        .body(Map.of("error", "Authentication required"));
-            }
+        return ReactiveSecurityContextHolder.getContext()
+                .map(SecurityContext::getAuthentication)
+                .flatMap(auth -> {
+                    logger.info("Authentication retrieved in getAllUsers: {}", auth);
+                    // Check if user has admin role
+                    boolean isAdmin = auth.getAuthorities().stream()
+                            .anyMatch(a -> a.getAuthority().equals("SCOPE_ADMIN") ||
+                                    a.getAuthority().equals("ADMIN"));
 
-            // Check if user has admin role
-            boolean isAdmin = auth.getAuthorities().stream()
-                    .anyMatch(a -> a.getAuthority().equals("SCOPE_ADMIN") ||
-                            a.getAuthority().equals("ADMIN"));
+                    if (!isAdmin) {
+                        logger.warn("Access denied - user {} does not have admin role", auth.getName());
+                        return Mono.just(ResponseEntity.status(HttpStatus.FORBIDDEN)
+                                .body(Map.of("error", "Access denied", "message", "Admin role required")));
+                    }
 
-            if (!isAdmin) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                        .body(Map.of("error", "Access denied", "message", "Admin role required"));
-            }
-
-            List<UserDTO> users = userService.getAllUsers();
-            return ResponseEntity.ok(users);
-        } catch (Exception e) {
-            logger.error("Error retrieving all users: {}", e.getMessage(), e);
-            Map<String, String> errorResponse = new HashMap<>();
-            errorResponse.put("error", "Failed to retrieve users");
-            errorResponse.put("message", e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
-        }
+                    try {
+                        // Get all users from the service
+                        List<UserDTO> users = userService.getAllUsers();
+                        logger.info("Successfully retrieved {} users", users.size());
+                        return Mono.just(ResponseEntity.ok(users));
+                    } catch (Exception e) {
+                        logger.error("Error retrieving all users: {}", e.getMessage(), e);
+                        Map<String, String> errorResponse = new HashMap<>();
+                        errorResponse.put("error", "Failed to retrieve users");
+                        errorResponse.put("message", e.getMessage());
+                        return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse));
+                    }
+                })
+                .defaultIfEmpty(ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "Authentication required")));
     }
 
     /**
