@@ -10,6 +10,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import jakarta.persistence.EntityNotFoundException;
 // Remove: import org.springframework.security.core.context.SecurityContextHolder;
 // Add:
 import org.springframework.security.core.Authentication; // For type hint if needed
@@ -30,8 +33,10 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/user")
 public class UserController {
 
+    private static final Logger logger = LoggerFactory.getLogger(UserController.class);
     private final UserService userService;
     private final UserRepository userRepository;
+
 
     @Autowired
     public UserController(UserService userService, UserRepository userRepository) {
@@ -43,27 +48,37 @@ public class UserController {
      * Get current user profile
      * MODIFIED to use @AuthenticationPrincipal
      */
+    // Method in gateway-admin/src/main/java/com/example/gateway_admin/Controller/UserController.java
+
     @GetMapping("/profile")
     public Mono<ResponseEntity<?>> getCurrentUserProfile(@AuthenticationPrincipal Jwt jwtPrincipal) {
         if (jwtPrincipal == null) {
-            ResponseEntity<?> unauthorizedResponse = ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
-            return Mono.just(unauthorizedResponse);
+            // This is Mono<ResponseEntity<Object>> - compatible with Mono<ResponseEntity<?>>
+            return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).build());
         }
         String username = jwtPrincipal.getSubject();
 
-        return Mono.fromCallable(() -> userService.getUserByUsername(username)) // Returns UserDTO
+        return Mono.fromCallable(() -> userService.getUserByUsername(username)) // Can throw EntityNotFoundException or others
                 .map(userDTO -> {
-                    // Explicitly create ResponseEntity<?>
+                    // If successful, userDTO is UserDTO. ResponseEntity.ok(userDTO) is ResponseEntity<UserDTO>.
+                    // Casting to ResponseEntity<?> is fine.
                     return (ResponseEntity<?>) ResponseEntity.ok(userDTO);
                 })
-                .subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic())
-                .defaultIfEmpty(ResponseEntity.notFound().build()) // Handle if userService returns null/empty Mono
-                .onErrorResume(e -> { // Generic error handling
-                    // Log error e
+                .onErrorResume(EntityNotFoundException.class, enfe -> {
+                    // Handle user not found specifically
+                    logger.warn("User profile not found for username '{}': {}", username, enfe.getMessage());
+                    // This is Mono<ResponseEntity<Object>> - compatible with Mono<ResponseEntity<?>>
+                    return Mono.just(ResponseEntity.notFound().build());
+                })
+                .onErrorResume(e -> { // Catch any other exceptions from the service call or map operator
+                    logger.error("Error fetching profile for username '{}': {}", username, e.getMessage(), e);
+                    // This is Mono<ResponseEntity<Map<String, String>>> - compatible with Mono<ResponseEntity<?>>
                     ResponseEntity<?> errorResponse = ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                            .body(Map.of("error", "Failed to fetch profile"));
-                    return Mono.just(errorResponse);
-                });
+                            .body(Map.of("error", "Failed to retrieve user profile."));
+                    return Mono.just
+                            (errorResponse);
+                })
+                .subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic());
     }
 
 
@@ -140,27 +155,35 @@ public class UserController {
      * Get all users (Admin only)
      * MODIFIED to use @AuthenticationPrincipal and return Mono
      */
+    // Method in gateway-admin/src/main/java/com/example/gateway_admin/Controller/UserController.java
+
     @GetMapping("/all")
     public Mono<ResponseEntity<?>> getAllUsers(@AuthenticationPrincipal Jwt jwtPrincipal) {
         if (jwtPrincipal == null) {
-            // Ensure this also matches Mono<ResponseEntity<?>>
-            ResponseEntity<?> unauthorizedResponse = ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
-            return Mono.just(unauthorizedResponse);
+            // This is Mono<ResponseEntity<Object>> - compatible with Mono<ResponseEntity<?>>
+            return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).build());
         }
         List<String> roles = jwtPrincipal.getClaimAsStringList("roles");
         if (roles == null || !roles.contains("SCOPE_ADMIN")) {
-            // Ensure this also matches Mono<ResponseEntity<?>>
-            ResponseEntity<?> forbiddenResponse = ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "Requires administrator privileges"));
-            return Mono.just(forbiddenResponse);
+            // This is Mono<ResponseEntity<Map<String, String>>> - compatible with Mono<ResponseEntity<?>>
+            return Mono.just(ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", "Requires administrator privileges")));
         }
 
         return Mono.fromCallable(() -> {
-            List<UserDTO> users = userService.getAllUsers();
-            // Create the ResponseEntity and immediately cast it to ResponseEntity<?>
-            // This ensures the lambda's return type is exactly ResponseEntity<?>
-            return (ResponseEntity<?>) ResponseEntity.ok(users);
-        }).subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic());
+                    List<UserDTO> users = userService.getAllUsers();
+                    // Directly return ResponseEntity<List<UserDTO>>
+                    return ResponseEntity.ok(users);
+                })
+                // Explicitly map the ResponseEntity<List<UserDTO>> to ResponseEntity<?>
+                .map(responseEntity -> (ResponseEntity<?>) responseEntity)
+                .subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic())
+                .onErrorResume(e -> { // Catch any exceptions from userService.getAllUsers() or the map
+                    logger.error("Error fetching all users: {}", e.getMessage(), e);
+                    // This is Mono<ResponseEntity<Map<String, String>>> - compatible with Mono<ResponseEntity<?>>
+                    return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                            .body(Map.of("error", "Failed to fetch users.")));
+                });
     }
 
     /**
@@ -248,15 +271,20 @@ public class UserController {
         }
 
         return Mono.fromCallable(() -> {
-            try {
-                userService.deleteUser(id);
-                // Construct ResponseEntity with a type compatible with ResponseEntity<?>
-                return (ResponseEntity<?>) ResponseEntity.ok(Map.of("message", "User deleted successfully"));
-            } catch (Exception e) {
-                return (ResponseEntity<?>) ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                        .body(Map.of("error", "Failed to delete user: " + e.getMessage()));
-            }
-        }).subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic());
+                    try {
+                        userService.deleteUser(id);
+                        // This is ResponseEntity<Map<String,String>>
+                        return (ResponseEntity<?>) ResponseEntity.ok(Map.of("message", "User deleted successfully"));
+                    } catch (Exception e) {
+                        logger.error("Failed to delete user {}: {}", id, e.getMessage(), e);
+                        // This is ResponseEntity<Map<String,String>>
+                        return (ResponseEntity<?>) ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                                .body(Map.of("error", "Failed to delete user: " + e.getMessage()));
+                    }
+                })
+                // It might be safer to add this map operation to be absolutely sure.
+                // .map(response -> (ResponseEntity<?>) response)
+                .subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic());
     }
 
     /**
