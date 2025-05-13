@@ -182,14 +182,22 @@ public class UserController {
     @GetMapping("/all")
     public ResponseEntity<?> getAllUsers() {
         try {
-            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            // Get the authentication context from the SecurityContextHolder
+            Authentication auth = ReactiveSecurityContextHolder.getContext()
+                    .map(SecurityContext::getAuthentication)
+                    .block(); // Use block() to get the authentication from the Mono
+
             if (auth == null) {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                         .body(Map.of("error", "Authentication required"));
             }
 
             // Check if user has admin role
-            if (!hasAdminRole(auth)) {
+            boolean isAdmin = auth.getAuthorities().stream()
+                    .anyMatch(a -> a.getAuthority().equals("SCOPE_ADMIN") ||
+                            a.getAuthority().equals("ADMIN"));
+
+            if (!isAdmin) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN)
                         .body(Map.of("error", "Access denied", "message", "Admin role required"));
             }

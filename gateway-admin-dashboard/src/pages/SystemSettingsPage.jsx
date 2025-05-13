@@ -229,21 +229,23 @@ const SystemSettingsPage = () => {
     }
   };
 
-  // Load users (admin only)
+  // gateway-admin-dashboard/src/pages/SystemSettingsPage.jsx
+
   const loadUsers = async () => {
     if (!contextUser?.isAdmin) return;
 
     console.log('SystemSettingsPage: Loading users for admin user', contextUser);
     setLoading(true);
     try {
-      console.log('SystemSettingsPage: Making API request to /api/user/all');
-      const response = await apiClient.get('/api/user/all'); // Fixed: Added missing /api prefix
+      // Use the same pattern that's succeeding for user/profile
+      console.log('SystemSettingsPage: Making API request to /user/all');
+      const response = await apiClient.get('/user/all'); // Match the working pattern
       console.log('SystemSettingsPage: Received user data:', response.data);
       setUsers(response.data);
       setFilteredUsers(response.data);
     } catch (error) {
+      // Error logging remains the same
       console.error('SystemSettingsPage: Error loading users:', error);
-      // Log detailed error information for debugging
       if (error.response) {
         console.error('SystemSettingsPage: Error response status:', error.response.status);
         console.error('SystemSettingsPage: Error response data:', error.response.data);
