@@ -1,10 +1,14 @@
 // gateway-admin/src/main/java/com/example/gateway_admin/Services/UserService.java
 package com.example.gateway_admin.Services;
 
+import com.example.gateway_admin.Controller.UserController.UserProfileRequest;
+import com.example.gateway_admin.Controller.UserController.UpdateUserRequest;
 import com.example.gateway_admin.DTO.UserDTO;
 import com.example.gateway_admin.Entities.User;
 import com.example.gateway_admin.Repositories.UserRepository;
 import jakarta.persistence.EntityNotFoundException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -17,11 +21,10 @@ import java.util.stream.Collectors;
 @Service
 public class UserService {
 
+    private static final Logger logger = LoggerFactory.getLogger(UserService.class);
+
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
-    private static final int MAX_FAILED_ATTEMPTS = 5;
-    private static final long LOCK_DURATION_MINUTES = 15;
-
 
     @Autowired
     public UserService(UserRepository userRepository, PasswordEncoder passwordEncoder) {
@@ -29,6 +32,9 @@ public class UserService {
         this.passwordEncoder = passwordEncoder;
     }
 
+    /**
+     * Get all users
+     */
     @Transactional(readOnly = true)
     public List<UserDTO> getAllUsers() {
         return userRepository.findAll().stream()
@@ -36,144 +42,225 @@ public class UserService {
                 .collect(Collectors.toList());
     }
 
+    /**
+     * Get user by ID
+     */
+    @Transactional(readOnly = true)
+    public UserDTO getUserById(Long id) {
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("User not found with ID: " + id));
+        return convertToDTO(user);
+    }
+
+    /**
+     * Get user by username
+     */
     @Transactional(readOnly = true)
     public UserDTO getUserByUsername(String username) {
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new EntityNotFoundException("User not found with username: " + username));
-        if (user.isAccountLocked()) {
-            throw new IllegalStateException("User account is locked.");
-        }
         return convertToDTO(user);
     }
 
-    @Transactional(readOnly = true)
-    public User findUserEntityByUsername(String username) {
-        return userRepository.findByUsername(username)
-                .orElseThrow(() -> new EntityNotFoundException("User not found: " + username));
-    }
-
-
+    /**
+     * Update user profile
+     */
     @Transactional
-    public UserDTO createUser(String username, String password, String firstName,
-                              String lastName, String email, String role) {
-        if (userRepository.existsByUsername(username)) {
-            throw new IllegalArgumentException("Username already exists");
-        }
-        if (userRepository.existsByEmail(email)) {
-            throw new IllegalArgumentException("Email already exists");
-        }
+    public UserDTO updateUserProfile(String username, UserProfileRequest request) {
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new EntityNotFoundException("User not found with username: " + username));
 
-        User user = new User();
-        user.setUsername(username);
-        user.setPassword(passwordEncoder.encode(password)); // Hash password
-        user.setFirstName(firstName);
-        user.setLastName(lastName);
-        user.setEmail(email);
-        user.setRole(role != null && "ADMIN".equalsIgnoreCase(role) ? "ADMIN" : "USER");
-        user.setActive(true);
-        user.setTwoFactorEnabled(false);
-        user.setSessionTimeoutMinutes(30);
-        user.setNotificationsEnabled(true);
+        // Update fields
+        user.setFirstName(request.getFirstName());
+        user.setLastName(request.getLastName());
 
+        // Check if email is changing and if it's available
+        if (!user.getEmail().equals(request.getEmail()) &&
+                userRepository.existsByEmail(request.getEmail())) {
+            throw new IllegalArgumentException("Email already in use by another account");
+        }
+        user.setEmail(request.getEmail());
+
+        // Save and return updated user
         User savedUser = userRepository.save(user);
         return convertToDTO(savedUser);
     }
 
+    /**
+     * Update profile image
+     */
     @Transactional
-    public UserDTO updateUserProfile(String username, UserDTO userDTO) {
+    public UserDTO updateProfileImage(String username, String imageUrl) {
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new EntityNotFoundException("User not found with username: " + username));
 
-        if (!user.getEmail().equals(userDTO.getEmail()) &&
-                userRepository.existsByEmail(userDTO.getEmail())) {
-            throw new IllegalArgumentException("Email already in use by another account.");
-        }
+        user.setProfileImageUrl(imageUrl);
+        User savedUser = userRepository.save(user);
 
-        user.setFirstName(userDTO.getFirstName());
-        user.setLastName(userDTO.getLastName());
-        user.setEmail(userDTO.getEmail());
-        user.setJobTitle(userDTO.getJobTitle());
-        user.setDepartment(userDTO.getDepartment());
-        // Profile image URL update would be handled separately
-
-        User updatedUser = userRepository.save(user);
-        return convertToDTO(updatedUser);
+        return convertToDTO(savedUser);
     }
 
+    /**
+     * Update password
+     */
     @Transactional
     public void updatePassword(String username, String currentPassword, String newPassword) {
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new EntityNotFoundException("User not found with username: " + username));
 
+        // Verify current password
         if (!passwordEncoder.matches(currentPassword, user.getPassword())) {
-            throw new IllegalArgumentException("Incorrect current password.");
+            throw new IllegalArgumentException("Current password is incorrect");
         }
-        if (newPassword.length() < 8) { // Basic validation
-            throw new IllegalArgumentException("New password must be at least 8 characters long.");
+
+        // Validate new password
+        if (newPassword == null || newPassword.length() < 8) {
+            throw new IllegalArgumentException("New password must be at least 8 characters long");
         }
+
+        // Update password
         user.setPassword(passwordEncoder.encode(newPassword));
         userRepository.save(user);
+
+        logger.info("Password updated for user: {}", username);
     }
 
+    /**
+     * Create new user
+     */
     @Transactional
-    public UserDTO updateSecuritySettings(String username, Boolean twoFactorEnabled,
-                                          Integer sessionTimeoutMinutes, Boolean notificationsEnabled) {
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new EntityNotFoundException("User not found with username: " + username));
+    public UserDTO createUser(String username, String password, String firstName,
+                              String lastName, String email, String role) {
+        // Validate inputs
+        if (username == null || username.trim().isEmpty()) {
+            throw new IllegalArgumentException("Username is required");
+        }
 
-        if (twoFactorEnabled != null) user.setTwoFactorEnabled(twoFactorEnabled);
-        if (sessionTimeoutMinutes != null) user.setSessionTimeoutMinutes(Math.max(5, Math.min(sessionTimeoutMinutes, 24 * 60))); // 5 min to 1 day
-        if (notificationsEnabled != null) user.setNotificationsEnabled(notificationsEnabled);
+        if (password == null || password.length() < 8) {
+            throw new IllegalArgumentException("Password must be at least 8 characters long");
+        }
 
-        User updatedUser = userRepository.save(user);
-        return convertToDTO(updatedUser);
+        if (email == null || !email.contains("@")) {
+            throw new IllegalArgumentException("Valid email is required");
+        }
+
+        // Check if username or email already exists
+        if (userRepository.existsByUsername(username)) {
+            throw new IllegalArgumentException("Username already exists");
+        }
+
+        if (userRepository.existsByEmail(email)) {
+            throw new IllegalArgumentException("Email already exists");
+        }
+
+        // Create new user
+        User user = new User();
+        user.setUsername(username);
+        user.setPassword(passwordEncoder.encode(password));
+        user.setFirstName(firstName);
+        user.setLastName(lastName);
+        user.setEmail(email);
+
+        // Set role (default to USER if not specified or invalid)
+        String normalizedRole = "USER";
+        if (role != null && "ADMIN".equalsIgnoreCase(role)) {
+            normalizedRole = "ADMIN";
+        }
+        user.setRole(normalizedRole);
+
+        // Set default values
+        user.setActive(true);
+        user.setCreatedAt(LocalDateTime.now());
+
+        // Save and return
+        User savedUser = userRepository.save(user);
+        return convertToDTO(savedUser);
     }
 
-
+    /**
+     * Update user
+     */
     @Transactional
-    public void recordLoginSuccess(String username) {
-        userRepository.findByUsername(username).ifPresent(user -> {
-            user.setFailedLoginAttempts(0);
-            user.setAccountLockedUntil(null);
-            user.setLastLoginAt(LocalDateTime.now());
-            userRepository.save(user);
-        });
-    }
+    public UserDTO updateUser(Long id, UpdateUserRequest request) {
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("User not found with ID: " + id));
 
-    @Transactional
-    public void recordLoginFailure(String username) {
-        userRepository.findByUsername(username).ifPresent(user -> {
-            user.setFailedLoginAttempts(user.getFailedLoginAttempts() + 1);
-            if (user.getFailedLoginAttempts() >= MAX_FAILED_ATTEMPTS) {
-                user.setAccountLockedUntil(LocalDateTime.now().plusMinutes(LOCK_DURATION_MINUTES));
+        // Update basic info
+        if (request.getFirstName() != null) {
+            user.setFirstName(request.getFirstName());
+        }
+
+        if (request.getLastName() != null) {
+            user.setLastName(request.getLastName());
+        }
+
+        // Check if email is changing and if it's available
+        if (request.getEmail() != null && !request.getEmail().equals(user.getEmail())) {
+            if (userRepository.existsByEmail(request.getEmail())) {
+                throw new IllegalArgumentException("Email already in use by another account");
             }
-            userRepository.save(user);
-        });
+            user.setEmail(request.getEmail());
+        }
+
+        // Update role if provided
+        if (request.getRole() != null) {
+            String normalizedRole = "USER";
+            if ("ADMIN".equalsIgnoreCase(request.getRole())) {
+                normalizedRole = "ADMIN";
+            }
+            user.setRole(normalizedRole);
+        }
+
+        // Save and return
+        User savedUser = userRepository.save(user);
+        return convertToDTO(savedUser);
     }
 
+    /**
+     * Update user status (active/inactive)
+     */
     @Transactional
-    public UserDTO updateUserStatus(Long userId, boolean active) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new EntityNotFoundException("User not found with id: " + userId));
+    public UserDTO updateUserStatus(Long id, boolean active) {
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("User not found with ID: " + id));
 
-        if (user.getUsername().equals("admin") && !active) { // Assuming "admin" is a superuser
-            throw new IllegalArgumentException("Cannot deactivate the primary administrator account.");
-        }
+        // Update active status
         user.setActive(active);
-        User updatedUser = userRepository.save(user);
-        return convertToDTO(updatedUser);
+
+        // Save and return
+        User savedUser = userRepository.save(user);
+        return convertToDTO(savedUser);
     }
 
+    /**
+     * Delete user
+     */
     @Transactional
-    public void deleteUser(Long userId) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new EntityNotFoundException("User not found with id: " + userId));
+    public void deleteUser(Long id) {
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("User not found with ID: " + id));
+
+        // Check if it's the primary admin account
         if (user.getUsername().equals("admin")) {
-            throw new IllegalArgumentException("Cannot delete the primary administrator account.");
+            throw new IllegalArgumentException("Cannot delete the primary administrator account");
         }
-        userRepository.deleteById(userId);
+
+        userRepository.delete(user);
+        logger.info("User deleted: ID={}, username={}", id, user.getUsername());
     }
 
+    /**
+     * Check if a user ID matches a username
+     */
+    @Transactional(readOnly = true)
+    public boolean isUserWithId(Long id, String username) {
+        User user = userRepository.findById(id).orElse(null);
+        return user != null && user.getUsername().equals(username);
+    }
+
+    /**
+     * Convert Entity to DTO
+     */
     public UserDTO convertToDTO(User user) {
         UserDTO dto = new UserDTO();
         dto.setId(user.getId());
@@ -181,15 +268,12 @@ public class UserService {
         dto.setFirstName(user.getFirstName());
         dto.setLastName(user.getLastName());
         dto.setEmail(user.getEmail());
-        dto.setJobTitle(user.getJobTitle());
-        dto.setDepartment(user.getDepartment());
         dto.setProfileImageUrl(user.getProfileImageUrl());
-        dto.setTwoFactorEnabled(user.getTwoFactorEnabled());
-        dto.setSessionTimeoutMinutes(user.getSessionTimeoutMinutes());
-        dto.setNotificationsEnabled(user.getNotificationsEnabled());
         dto.setRole(user.getRole());
         dto.setStatus(user.isActive() ? "Active" : "Disabled");
         dto.setLastLogin(user.getLastLoginAt());
+        dto.setIsAdmin(user.isAdmin());
+
         return dto;
     }
 }

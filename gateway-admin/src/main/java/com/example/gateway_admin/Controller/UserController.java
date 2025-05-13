@@ -2,31 +2,26 @@
 package com.example.gateway_admin.Controller;
 
 import com.example.gateway_admin.DTO.UserDTO;
-import com.example.gateway_admin.Entities.User;
-import com.example.gateway_admin.Repositories.UserRepository;
+import com.example.gateway_admin.Services.StorageService;
 import com.example.gateway_admin.Services.UserService;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import jakarta.persistence.EntityNotFoundException;
-// Remove: import org.springframework.security.core.context.SecurityContextHolder;
-// Add:
-import org.springframework.security.core.Authentication; // For type hint if needed
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.oauth2.jwt.Jwt; // Or your specific principal type
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.ReactiveSecurityContextHolder;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
-import reactor.core.publisher.Mono; // Import Mono
+import org.springframework.web.multipart.MultipartFile;
+import reactor.core.publisher.Mono;
 
-import java.security.Principal; // Can also use this
-import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 @CrossOrigin(origins = "http://localhost:5173")
 @RestController
@@ -34,310 +29,415 @@ import java.util.stream.Collectors;
 public class UserController {
 
     private static final Logger logger = LoggerFactory.getLogger(UserController.class);
-    private final UserService userService;
-    private final UserRepository userRepository;
 
+    private final UserService userService;
+    private final StorageService storageService;
 
     @Autowired
-    public UserController(UserService userService, UserRepository userRepository) {
+    public UserController(UserService userService, StorageService storageService) {
         this.userService = userService;
-        this.userRepository = userRepository;
+        this.storageService = storageService;
     }
-
-    /**
-     * Get current user profile
-     * MODIFIED to use @AuthenticationPrincipal
-     */
-    // Method in gateway-admin/src/main/java/com/example/gateway_admin/Controller/UserController.java
 
     @GetMapping("/profile")
-    public Mono<ResponseEntity<?>> getCurrentUserProfile(@AuthenticationPrincipal Jwt jwtPrincipal) {
-        if (jwtPrincipal == null) {
-            // This is Mono<ResponseEntity<Object>> - compatible with Mono<ResponseEntity<?>>
-            return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).build());
-        }
-        String username = jwtPrincipal.getSubject();
+    public Mono<ResponseEntity<?>> getCurrentUserProfile() {
+        return ReactiveSecurityContextHolder.getContext()
+                .map(SecurityContext::getAuthentication)
+                .flatMap(authentication -> {
+                    try {
+                        String username = authentication.getName();
+                        System.out.println("Authentication principal: " + authentication.getPrincipal());
+                        System.out.println("Username from authentication: " + username);
+                        System.out.println("Authorities: " + authentication.getAuthorities());
 
-        return Mono.fromCallable(() -> userService.getUserByUsername(username)) // Can throw EntityNotFoundException or others
-                .map(userDTO -> {
-                    // If successful, userDTO is UserDTO. ResponseEntity.ok(userDTO) is ResponseEntity<UserDTO>.
-                    // Casting to ResponseEntity<?> is fine.
-                    return (ResponseEntity<?>) ResponseEntity.ok(userDTO);
+                        UserDTO userDTO = userService.getUserByUsername(username);
+                        return Mono.just(ResponseEntity.ok(userDTO));
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        Map<String, String> errorResponse = new HashMap<>();
+                        errorResponse.put("error", "Failed to retrieve user profile");
+                        errorResponse.put("message", e.getMessage());
+                        errorResponse.put("type", e.getClass().getName());
+                        return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse));
+                    }
                 })
-                .onErrorResume(EntityNotFoundException.class, enfe -> {
-                    // Handle user not found specifically
-                    logger.warn("User profile not found for username '{}': {}", username, enfe.getMessage());
-                    // This is Mono<ResponseEntity<Object>> - compatible with Mono<ResponseEntity<?>>
-                    return Mono.just(ResponseEntity.notFound().build());
-                })
-                .onErrorResume(e -> { // Catch any other exceptions from the service call or map operator
-                    logger.error("Error fetching profile for username '{}': {}", username, e.getMessage(), e);
-                    // This is Mono<ResponseEntity<Map<String, String>>> - compatible with Mono<ResponseEntity<?>>
-                    ResponseEntity<?> errorResponse = ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                            .body(Map.of("error", "Failed to retrieve user profile."));
-                    return Mono.just
-                            (errorResponse);
-                })
-                .subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic());
+                .defaultIfEmpty(ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "No authentication found", "message", "User not authenticated")));
     }
 
-
     /**
-     * Update user profile
-     * MODIFIED to use @AuthenticationPrincipal and return Mono
+     * Update user profile information
      */
     @PutMapping("/profile")
-    public Mono<ResponseEntity<UserDTO>> updateProfile(@AuthenticationPrincipal Jwt jwtPrincipal,
-                                                       @Valid @RequestBody UserDTO userDTO) {
-        if (jwtPrincipal == null) {
-            return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).build());
-        }
-        String username = jwtPrincipal.getSubject();
-        // Assuming userService.updateUserProfile is blocking
-        return Mono.fromCallable(() -> {
-            UserDTO updatedUser = userService.updateUserProfile(username, userDTO);
+    public ResponseEntity<?> updateProfile(@Valid @RequestBody UserProfileRequest request) {
+        try {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            if (auth == null) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "Authentication required"));
+            }
+
+            String username = auth.getName();
+            logger.info("Updating profile for user: {}", username);
+
+            UserDTO updatedUser = userService.updateUserProfile(username, request);
             return ResponseEntity.ok(updatedUser);
-        }).subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic());
+        } catch (Exception e) {
+            logger.error("Error updating user profile: {}", e.getMessage(), e);
+            Map<String, String> errorResponse = new HashMap<>();
+            errorResponse.put("error", "Failed to update user profile");
+            errorResponse.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+
+    /**
+     * Upload profile picture
+     */
+    @PostMapping(value = "/profile-image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<?> uploadProfilePicture(@RequestParam("profileImage") MultipartFile file) {
+        try {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            if (auth == null) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "Authentication required"));
+            }
+
+            String username = auth.getName();
+            logger.info("Uploading profile picture for user: {}", username);
+
+            if (file.isEmpty()) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "File is empty", "message", "Please select a file to upload"));
+            }
+
+            // Validate file type
+            String contentType = file.getContentType();
+            if (contentType == null || !contentType.startsWith("image/")) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Invalid file type", "message", "Only image files are allowed"));
+            }
+
+            // Save the file and update the user profile
+            String imageUrl = storageService.storeProfileImage(file, username);
+            UserDTO updatedUser = userService.updateProfileImage(username, imageUrl);
+
+            return ResponseEntity.ok(Map.of(
+                    "profileImageUrl", imageUrl,
+                    "message", "Profile picture uploaded successfully"
+            ));
+        } catch (Exception e) {
+            logger.error("Error uploading profile picture: {}", e.getMessage(), e);
+            Map<String, String> errorResponse = new HashMap<>();
+            errorResponse.put("error", "Failed to upload profile picture");
+            errorResponse.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
     }
 
     /**
      * Update password
-     * MODIFIED to use @AuthenticationPrincipal and return Mono
      */
     @PutMapping("/password")
-    public Mono<ResponseEntity<?>> updatePassword(@AuthenticationPrincipal Jwt jwtPrincipal,
-                                                  @RequestBody PasswordChangeRequest request) {
-        if (jwtPrincipal == null) {
-            ResponseEntity<?> unauthorizedResponse = ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
-            return Mono.just(unauthorizedResponse);
-        }
-        String username = jwtPrincipal.getSubject();
-
-        return Mono.fromCallable(() -> {
-            try {
-                userService.updatePassword(username, request.getCurrentPassword(), request.getNewPassword());
-                Map<String, String> responseBody = new HashMap<>();
-                responseBody.put("message", "Password updated successfully");
-                // Create and cast immediately
-                return (ResponseEntity<?>) ResponseEntity.ok(responseBody);
-            } catch (IllegalArgumentException e) {
-                // Create and cast immediately
-                return (ResponseEntity<?>) ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                        .body(Map.of("error", e.getMessage()));
+    public ResponseEntity<?> updatePassword(@Valid @RequestBody PasswordChangeRequest request) {
+        try {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            if (auth == null) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "Authentication required"));
             }
-        }).subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic());
-    }
 
-    /**
-     * Update security settings
-     * MODIFIED to use @AuthenticationPrincipal and return Mono
-     */
-    @PutMapping("/security")
-    public Mono<ResponseEntity<UserDTO>> updateSecuritySettings(@AuthenticationPrincipal Jwt jwtPrincipal,
-                                                                @RequestBody SecuritySettingsRequest request) {
-        if (jwtPrincipal == null) {
-            return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).build());
+            String username = auth.getName();
+            logger.info("Updating password for user: {}", username);
+
+            userService.updatePassword(username, request.getCurrentPassword(), request.getNewPassword());
+
+            return ResponseEntity.ok(Map.of(
+                    "message", "Password updated successfully"
+            ));
+        } catch (IllegalArgumentException e) {
+            logger.warn("Password update failed: {}", e.getMessage());
+            Map<String, String> errorResponse = new HashMap<>();
+            errorResponse.put("error", "Invalid password");
+            errorResponse.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
+        } catch (Exception e) {
+            logger.error("Error updating password: {}", e.getMessage(), e);
+            Map<String, String> errorResponse = new HashMap<>();
+            errorResponse.put("error", "Failed to update password");
+            errorResponse.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
         }
-        String username = jwtPrincipal.getSubject();
-
-        return Mono.fromCallable(() -> {
-            UserDTO updatedUser = userService.updateSecuritySettings(
-                    username,
-                    request.getTwoFactorEnabled(),
-                    request.getSessionTimeoutMinutes(),
-                    request.getNotificationsEnabled()
-            );
-            return ResponseEntity.ok(updatedUser);
-        }).subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic());
     }
 
     /**
      * Get all users (Admin only)
-     * MODIFIED to use @AuthenticationPrincipal and return Mono
      */
-    // Method in gateway-admin/src/main/java/com/example/gateway_admin/Controller/UserController.java
-
     @GetMapping("/all")
-    public Mono<ResponseEntity<?>> getAllUsers(@AuthenticationPrincipal Jwt jwtPrincipal) {
-        if (jwtPrincipal == null) {
-            // This is Mono<ResponseEntity<Object>> - compatible with Mono<ResponseEntity<?>>
-            return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).build());
-        }
-        List<String> roles = jwtPrincipal.getClaimAsStringList("roles");
-        if (roles == null || !roles.contains("SCOPE_ADMIN")) {
-            // This is Mono<ResponseEntity<Map<String, String>>> - compatible with Mono<ResponseEntity<?>>
-            return Mono.just(ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "Requires administrator privileges")));
-        }
+    public ResponseEntity<?> getAllUsers() {
+        try {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            if (auth == null) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "Authentication required"));
+            }
 
-        return Mono.fromCallable(() -> {
-                    List<UserDTO> users = userService.getAllUsers();
-                    // Directly return ResponseEntity<List<UserDTO>>
-                    return ResponseEntity.ok(users);
-                })
-                // Explicitly map the ResponseEntity<List<UserDTO>> to ResponseEntity<?>
-                .map(responseEntity -> (ResponseEntity<?>) responseEntity)
-                .subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic())
-                .onErrorResume(e -> { // Catch any exceptions from userService.getAllUsers() or the map
-                    logger.error("Error fetching all users: {}", e.getMessage(), e);
-                    // This is Mono<ResponseEntity<Map<String, String>>> - compatible with Mono<ResponseEntity<?>>
-                    return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                            .body(Map.of("error", "Failed to fetch users.")));
-                });
+            // Check if user has admin role
+            if (!hasAdminRole(auth)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("error", "Access denied", "message", "Admin role required"));
+            }
+
+            List<UserDTO> users = userService.getAllUsers();
+            return ResponseEntity.ok(users);
+        } catch (Exception e) {
+            logger.error("Error retrieving all users: {}", e.getMessage(), e);
+            Map<String, String> errorResponse = new HashMap<>();
+            errorResponse.put("error", "Failed to retrieve users");
+            errorResponse.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+
+    /**
+     * Get user by ID (Admin only)
+     */
+    @GetMapping("/{id}")
+    public ResponseEntity<?> getUserById(@PathVariable Long id) {
+        try {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            if (auth == null) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "Authentication required"));
+            }
+
+            // Check if user has admin role or is requesting their own profile
+            if (!hasAdminRole(auth) && !isOwnProfile(auth, id)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("error", "Access denied", "message", "You can only view your own profile"));
+            }
+
+            UserDTO user = userService.getUserById(id);
+            return ResponseEntity.ok(user);
+        } catch (Exception e) {
+            logger.error("Error retrieving user {}: {}", id, e.getMessage(), e);
+            Map<String, String> errorResponse = new HashMap<>();
+            errorResponse.put("error", "Failed to retrieve user");
+            errorResponse.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
     }
 
     /**
      * Create new user (Admin only)
-     * MODIFIED to use @AuthenticationPrincipal and return Mono
      */
     @PostMapping
-    public Mono<ResponseEntity<?>> createUser(@AuthenticationPrincipal Jwt jwtPrincipal,
-                                              @Valid @RequestBody CreateUserRequest request) {
-        if (jwtPrincipal == null) {
-            return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).build());
-        }
-        List<String> roles = jwtPrincipal.getClaimAsStringList("roles");
-        if (roles == null || !roles.contains("SCOPE_ADMIN")) {
-            return Mono.just(ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "Requires administrator privileges")));
-        }
-
-        return Mono.fromCallable(() -> {
-            try {
-                UserDTO newUser = userService.createUser(
-                        request.getUsername(),
-                        request.getPassword(),
-                        request.getFirstName(),
-                        request.getLastName(),
-                        request.getEmail(),
-                        request.getRole()
-                );
-                return ResponseEntity.status(HttpStatus.CREATED).body(newUser);
-            } catch (IllegalArgumentException e) {
-                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                        .body(Map.of("error", e.getMessage()));
+    public ResponseEntity<?> createUser(@Valid @RequestBody CreateUserRequest request) {
+        try {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            if (auth == null) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "Authentication required"));
             }
-        }).subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic());
+
+            // Check if user has admin role
+            if (!hasAdminRole(auth)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("error", "Access denied", "message", "Admin role required"));
+            }
+
+            UserDTO newUser = userService.createUser(
+                    request.getUsername(),
+                    request.getPassword(),
+                    request.getFirstName(),
+                    request.getLastName(),
+                    request.getEmail(),
+                    request.getRole()
+            );
+
+            return ResponseEntity.status(HttpStatus.CREATED).body(newUser);
+        } catch (IllegalArgumentException e) {
+            logger.warn("User creation failed: {}", e.getMessage());
+            Map<String, String> errorResponse = new HashMap<>();
+            errorResponse.put("error", "Invalid user data");
+            errorResponse.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
+        } catch (Exception e) {
+            logger.error("Error creating user: {}", e.getMessage(), e);
+            Map<String, String> errorResponse = new HashMap<>();
+            errorResponse.put("error", "Failed to create user");
+            errorResponse.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
     }
 
     /**
-     * Update user status (activate/deactivate) (Admin only)
-     * MODIFIED to use @AuthenticationPrincipal and return Mono
+     * Update user (Admin only)
+     */
+    @PutMapping("/{id}")
+    public ResponseEntity<?> updateUser(@PathVariable Long id, @Valid @RequestBody UpdateUserRequest request) {
+        try {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            if (auth == null) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "Authentication required"));
+            }
+
+            // Check if user has admin role or is updating their own profile
+            if (!hasAdminRole(auth) && !isOwnProfile(auth, id)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("error", "Access denied", "message", "You can only update your own profile"));
+            }
+
+            // Only admin can change roles
+            if (request.getRole() != null && !hasAdminRole(auth)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("error", "Access denied", "message", "Only admins can change user roles"));
+            }
+
+            UserDTO updatedUser = userService.updateUser(id, request);
+            return ResponseEntity.ok(updatedUser);
+        } catch (IllegalArgumentException e) {
+            logger.warn("User update failed for ID {}: {}", id, e.getMessage());
+            Map<String, String> errorResponse = new HashMap<>();
+            errorResponse.put("error", "Invalid user data");
+            errorResponse.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
+        } catch (Exception e) {
+            logger.error("Error updating user {}: {}", id, e.getMessage(), e);
+            Map<String, String> errorResponse = new HashMap<>();
+            errorResponse.put("error", "Failed to update user");
+            errorResponse.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+
+    /**
+     * Update user status (Admin only)
      */
     @PatchMapping("/{id}/status")
-    public Mono<ResponseEntity<?>> updateUserStatus(@AuthenticationPrincipal Jwt jwtPrincipal,
-                                                    @PathVariable Long id,
-                                                    @RequestBody Map<String, Boolean> request) {
-        if (jwtPrincipal == null) {
-            return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).build());
-        }
-        List<String> roles = jwtPrincipal.getClaimAsStringList("roles");
-        if (roles == null || !roles.contains("SCOPE_ADMIN")) {
-            return Mono.just(ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "Requires administrator privileges")));
-        }
-
-        Boolean active = request.get("active");
-        if (active == null) {
-            return Mono.just(ResponseEntity.badRequest()
-                    .body(Map.of("error", "Status value required")));
-        }
-
-        return Mono.fromCallable(() -> {
-            try {
-                UserDTO updatedUser = userService.updateUserStatus(id, active);
-                return ResponseEntity.ok(updatedUser);
-            } catch (Exception e) {
-                return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                        .body(Map.of("error", "Failed to update user status: " + e.getMessage()));
+    public ResponseEntity<?> updateUserStatus(@PathVariable Long id, @RequestBody Map<String, Boolean> request) {
+        try {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            if (auth == null) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "Authentication required"));
             }
-        }).subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic());
+
+            // Check if user has admin role
+            if (!hasAdminRole(auth)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("error", "Access denied", "message", "Admin role required"));
+            }
+
+            // Get the active status from the request
+            Boolean active = request.get("active");
+            if (active == null) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Missing data", "message", "Active status is required"));
+            }
+
+            // Prevent admin from deactivating their own account
+            String adminUsername = auth.getName();
+            if (userService.isUserWithId(id, adminUsername) && !active) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Invalid operation", "message", "You cannot deactivate your own account"));
+            }
+
+            UserDTO updatedUser = userService.updateUserStatus(id, active);
+            return ResponseEntity.ok(updatedUser);
+        } catch (Exception e) {
+            logger.error("Error updating user status for ID {}: {}", id, e.getMessage(), e);
+            Map<String, String> errorResponse = new HashMap<>();
+            errorResponse.put("error", "Failed to update user status");
+            errorResponse.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
     }
 
     /**
      * Delete user (Admin only)
-     * MODIFIED to use @AuthenticationPrincipal and return Mono
      */
     @DeleteMapping("/{id}")
-    public Mono<ResponseEntity<?>> deleteUser(@AuthenticationPrincipal Jwt jwtPrincipal,
-                                              @PathVariable Long id) {
-        if (jwtPrincipal == null) {
-            return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).build());
-        }
-        List<String> roles = jwtPrincipal.getClaimAsStringList("roles");
-        if (roles == null || !roles.contains("SCOPE_ADMIN")) {
-            return Mono.just(ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "Requires administrator privileges")));
-        }
-
-        return Mono.fromCallable(() -> {
-                    try {
-                        userService.deleteUser(id);
-                        // This is ResponseEntity<Map<String,String>>
-                        return (ResponseEntity<?>) ResponseEntity.ok(Map.of("message", "User deleted successfully"));
-                    } catch (Exception e) {
-                        logger.error("Failed to delete user {}: {}", id, e.getMessage(), e);
-                        // This is ResponseEntity<Map<String,String>>
-                        return (ResponseEntity<?>) ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                                .body(Map.of("error", "Failed to delete user: " + e.getMessage()));
-                    }
-                })
-                // It might be safer to add this map operation to be absolutely sure.
-                // .map(response -> (ResponseEntity<?>) response)
-                .subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic());
-    }
-
-    /**
-     * Get user session info
-     * MODIFIED to use @AuthenticationPrincipal and return Mono
-     */
-    @GetMapping("/session")
-    public Mono<ResponseEntity<?>> getUserSession(@AuthenticationPrincipal Jwt jwtPrincipal) {
-        if (jwtPrincipal == null) {
-            return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).build());
-        }
-        String username = jwtPrincipal.getSubject();
-        List<String> authorities = jwtPrincipal.getClaimAsStringList("roles");
-
-        return Mono.fromCallable(() -> {
-            User user = userRepository.findByUsername(username).orElse(null);
-            if (user == null) {
-                // Construct ResponseEntity with a type compatible with ResponseEntity<?>
-                return (ResponseEntity<?>) ResponseEntity.status(HttpStatus.NOT_FOUND)
-                        .body(Map.of("error", "User not found"));
+    public ResponseEntity<?> deleteUser(@PathVariable Long id) {
+        try {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            if (auth == null) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "Authentication required"));
             }
 
-            Map<String, Object> sessionInfo = new HashMap<>();
-            sessionInfo.put("username", username);
-            sessionInfo.put("authorities", authorities);
-            sessionInfo.put("sessionTimeoutMinutes", user.getSessionTimeoutMinutes());
-            sessionInfo.put("lastLogin", user.getLastLoginAt());
+            // Check if user has admin role
+            if (!hasAdminRole(auth)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("error", "Access denied", "message", "Admin role required"));
+            }
 
-            // Construct ResponseEntity with a type compatible with ResponseEntity<?>
-            return (ResponseEntity<?>) ResponseEntity.ok(sessionInfo);
-        }).subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic());
+            // Prevent admin from deleting their own account
+            String adminUsername = auth.getName();
+            if (userService.isUserWithId(id, adminUsername)) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Invalid operation", "message", "You cannot delete your own account"));
+            }
+
+            userService.deleteUser(id);
+            return ResponseEntity.ok(Map.of(
+                    "message", "User deleted successfully"
+            ));
+        } catch (Exception e) {
+            logger.error("Error deleting user {}: {}", id, e.getMessage(), e);
+            Map<String, String> errorResponse = new HashMap<>();
+            errorResponse.put("error", "Failed to delete user");
+            errorResponse.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
     }
 
-    // Inner DTO classes remain the same
+    // Helper methods for role and identity checks
+
+    private boolean hasAdminRole(Authentication auth) {
+        return auth.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("SCOPE_ADMIN") ||
+                        a.getAuthority().equals("ROLE_ADMIN"));
+    }
+
+    private boolean isOwnProfile(Authentication auth, Long userId) {
+        try {
+            String username = auth.getName();
+            return userService.isUserWithId(userId, username);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    // Request/Response classes
+
+    public static class UserProfileRequest {
+        private String firstName;
+        private String lastName;
+        private String email;
+
+        // Getters and setters
+        public String getFirstName() { return firstName; }
+        public void setFirstName(String firstName) { this.firstName = firstName; }
+
+        public String getLastName() { return lastName; }
+        public void setLastName(String lastName) { this.lastName = lastName; }
+
+        public String getEmail() { return email; }
+        public void setEmail(String email) { this.email = email; }
+    }
+
     public static class PasswordChangeRequest {
         private String currentPassword;
         private String newPassword;
+
+        // Getters and setters
         public String getCurrentPassword() { return currentPassword; }
         public void setCurrentPassword(String currentPassword) { this.currentPassword = currentPassword; }
+
         public String getNewPassword() { return newPassword; }
         public void setNewPassword(String newPassword) { this.newPassword = newPassword; }
-    }
-
-    public static class SecuritySettingsRequest {
-        private Boolean twoFactorEnabled;
-        private Integer sessionTimeoutMinutes;
-        private Boolean notificationsEnabled;
-        public Boolean getTwoFactorEnabled() { return twoFactorEnabled; }
-        public void setTwoFactorEnabled(Boolean twoFactorEnabled) { this.twoFactorEnabled = twoFactorEnabled; }
-        public Integer getSessionTimeoutMinutes() { return sessionTimeoutMinutes; }
-        public void setSessionTimeoutMinutes(Integer sessionTimeoutMinutes) { this.sessionTimeoutMinutes = sessionTimeoutMinutes; }
-        public Boolean getNotificationsEnabled() { return notificationsEnabled; }
-        public void setNotificationsEnabled(Boolean notificationsEnabled) { this.notificationsEnabled = notificationsEnabled; }
     }
 
     public static class CreateUserRequest {
@@ -347,16 +447,43 @@ public class UserController {
         private String lastName;
         private String email;
         private String role;
+
+        // Getters and setters
         public String getUsername() { return username; }
         public void setUsername(String username) { this.username = username; }
+
         public String getPassword() { return password; }
         public void setPassword(String password) { this.password = password; }
+
         public String getFirstName() { return firstName; }
         public void setFirstName(String firstName) { this.firstName = firstName; }
+
         public String getLastName() { return lastName; }
         public void setLastName(String lastName) { this.lastName = lastName; }
+
         public String getEmail() { return email; }
         public void setEmail(String email) { this.email = email; }
+
+        public String getRole() { return role; }
+        public void setRole(String role) { this.role = role; }
+    }
+
+    public static class UpdateUserRequest {
+        private String firstName;
+        private String lastName;
+        private String email;
+        private String role;
+
+        // Getters and setters
+        public String getFirstName() { return firstName; }
+        public void setFirstName(String firstName) { this.firstName = firstName; }
+
+        public String getLastName() { return lastName; }
+        public void setLastName(String lastName) { this.lastName = lastName; }
+
+        public String getEmail() { return email; }
+        public void setEmail(String email) { this.email = email; }
+
         public String getRole() { return role; }
         public void setRole(String role) { this.role = role; }
     }
