@@ -29,6 +29,23 @@ export default defineConfig({
           });
         }
       },
+      // Add this block to route metrics requests to the gateway (demo 2)
+      '/api/metrics': {
+        target: 'http://localhost:9080', // Gateway (demo 2) port
+        changeOrigin: true,
+        secure: false,
+        configure: (proxy, _options) => {
+          proxy.on('error', (err, _req, _res) => {
+            console.log('proxy error', err);
+          });
+          proxy.on('proxyReq', (proxyReq, req, _res) => {
+            console.log('Sending Metrics Request:', req.method, req.url);
+          });
+          proxy.on('proxyRes', (proxyRes, req, _res) => {
+            console.log('Received Metrics Response:', proxyRes.statusCode, req.url);
+          });
+        }
+      },
       // Proxy other /api/** requests (user profile, routes, etc.) to the admin service (gateway-admin)
       '/api': {
         target: 'http://localhost:8081', // Admin service (gateway-admin) port

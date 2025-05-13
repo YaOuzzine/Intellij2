@@ -6,7 +6,7 @@ import {
   Dialog, DialogTitle, DialogContent, DialogActions,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Divider, Chip, IconButton, Tabs, Tab, FormControlLabel, Switch,
-  Tooltip, Menu, MenuItem
+  Tooltip, Menu, MenuItem, Badge, Avatar, LinearProgress
 } from '@mui/material';
 import {
   Search as SearchIcon,
@@ -18,7 +18,13 @@ import {
   MoreVert as MoreVertIcon,
   Timeline as TimelineIcon,
   Check as CheckIcon,
-  Close as CloseIcon
+  Close as CloseIcon,
+  BarChart as BarChartIcon,
+  PieChart as PieChartIcon,
+  ShowChart as LineChartIcon,
+  Traffic as TrafficIcon,
+  Block as BlockIcon,
+  Speed as SpeedIcon
 } from '@mui/icons-material';
 import { styled } from '@mui/material/styles';
 import { fetchGatewayRoutes, updateGatewayRoute } from '../services/dataService';
@@ -26,52 +32,124 @@ import apiClient from '../apiClient';
 import {
   AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis,
   CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
-  PieChart, Pie, Cell
+  PieChart, Pie, Cell, RadialBarChart, RadialBar, PolarAngleAxis
 } from 'recharts';
 
-// Styled components
+// Custom styled components
 const StyledCard = styled(Card)(({ theme }) => ({
   height: '100%',
   display: 'flex',
   flexDirection: 'column',
   transition: 'transform 0.3s, box-shadow 0.3s',
+  borderRadius: '12px',
   '&:hover': {
-    transform: 'translateY(-4px)',
-    boxShadow: theme.shadows[4],
+    transform: 'translateY(-5px)',
+    boxShadow: theme.shadows[6],
   },
+  borderLeft: `4px solid ${theme.palette.primary.main}`
 }));
 
 const MetricValue = styled(Typography)(({ theme }) => ({
-  fontSize: '2rem',
-  fontWeight: 500,
+  fontSize: '2.5rem',
+  fontWeight: 700,
   marginBottom: theme.spacing(1),
+  background: theme.palette.mode === 'dark'
+      ? 'linear-gradient(45deg, #FFFFFF, #E0E0E0)'
+      : 'linear-gradient(45deg, #1976d2, #2196F3)',
+  WebkitBackgroundClip: 'text',
+  WebkitTextFillColor: 'transparent'
+}));
+
+const StatusBadge = styled(Badge)(({ theme, status }) => ({
+  '& .MuiBadge-badge': {
+    backgroundColor: getStatusColor(status),
+    color: getStatusColor(status),
+    boxShadow: `0 0 0 2px ${theme.palette.background.paper}`,
+    '&::after': {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      width: '100%',
+      height: '100%',
+      borderRadius: '50%',
+      animation: 'ripple 1.2s infinite ease-in-out',
+      border: '1px solid currentColor',
+      content: '""',
+    },
+  },
+  '@keyframes ripple': {
+    '0%': {
+      transform: 'scale(.8)',
+      opacity: 1,
+    },
+    '100%': {
+      transform: 'scale(2.4)',
+      opacity: 0,
+    },
+  },
 }));
 
 const PercentageChip = styled(Chip)(({ theme, value }) => {
   let color = theme.palette.success.main;
-  let bgcolor = theme.palette.success.light;
+  let bgcolor = theme.palette.success.light + '30';
 
   if (value > 5) {
     color = theme.palette.warning.main;
-    bgcolor = theme.palette.warning.light;
+    bgcolor = theme.palette.warning.light + '30';
   }
   if (value > 10) {
     color = theme.palette.error.main;
-    bgcolor = theme.palette.error.light;
+    bgcolor = theme.palette.error.light + '30';
   }
 
   return {
     backgroundColor: bgcolor,
     color: color,
     fontWeight: 'bold',
+    borderRadius: '4px',
+    padding: theme.spacing(0.5)
   };
 });
 
-const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d'];
+const COLORS = [
+  '#0088FE', '#00C49F', '#FFBB28', '#FF8042',
+  '#8884d8', '#82ca9d', '#FF6B6B', '#4ECDC4',
+  '#45B7D1', '#FFA07A'
+];
+
+const chartTheme = {
+  textColor: '#6B7280',
+  axisColor: '#E5E7EB',
+  gridColor: '#F3F4F6',
+  tooltipBg: '#1F2937',
+  tooltipColor: '#F9FAFB'
+};
+
+// Helper functions
+const getStatusColor = (status) => {
+  switch (status) {
+    case 'critical': return '#EF4444';
+    case 'warning': return '#F59E0B';
+    case 'healthy': return '#10B981';
+    case 'disabled': return '#9CA3AF';
+    default: return '#9CA3AF';
+  }
+};
+
+const formatTimeWindow = (ms) => {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60000) return `${ms / 1000}s`;
+  return `${ms / 60000}m`;
+};
+
+const formatDate = (timestamp) => {
+  const date = new Date(timestamp);
+  return `${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
+};
 
 // Main component
 const RateLimitPage = () => {
-  // State for routes and metrics
+  // State management (same as original)
   const [routes, setRoutes] = useState([]);
   const [rateLimitMetrics, setRateLimitMetrics] = useState({
     routes: [],
@@ -92,23 +170,18 @@ const RateLimitPage = () => {
   const refreshTimerRef = useRef(null);
   const lastUpdatedRef = useRef(Date.now());
   const [lastUpdated, setLastUpdated] = useState('Just now');
-
-  // Dialog states
   const [configDialogOpen, setConfigDialogOpen] = useState(false);
   const [selectedRoute, setSelectedRoute] = useState(null);
   const [rateLimitValues, setRateLimitValues] = useState({
     maxRequests: 10,
     timeWindowMs: 60000
   });
-
-  // Menu state
   const [menuAnchorEl, setMenuAnchorEl] = useState(null);
   const [visualizationMode, setVisualizationMode] = useState('all');
 
-  // Load data on mount
+  // Data loading and effects (same as original)
   useEffect(() => {
     loadData();
-
     return () => {
       if (refreshTimerRef.current) {
         clearInterval(refreshTimerRef.current);
@@ -116,18 +189,15 @@ const RateLimitPage = () => {
     };
   }, []);
 
-  // Handle auto-refresh
   useEffect(() => {
     if (refreshTimerRef.current) {
       clearInterval(refreshTimerRef.current);
     }
-
     if (autoRefresh) {
       refreshTimerRef.current = setInterval(() => {
         loadData(false);
       }, refreshInterval);
     }
-
     return () => {
       if (refreshTimerRef.current) {
         clearInterval(refreshTimerRef.current);
@@ -135,12 +205,10 @@ const RateLimitPage = () => {
     };
   }, [autoRefresh, refreshInterval]);
 
-  // Update last updated time
   useEffect(() => {
     const timer = setInterval(() => {
       const now = Date.now();
       const diff = Math.floor((now - lastUpdatedRef.current) / 1000);
-
       if (diff < 60) {
         setLastUpdated(`${diff} second${diff !== 1 ? 's' : ''} ago`);
       } else if (diff < 3600) {
@@ -151,30 +219,22 @@ const RateLimitPage = () => {
         setLastUpdated(`${hours} hour${hours !== 1 ? 's' : ''} ago`);
       }
     }, 1000);
-
     return () => clearInterval(timer);
   }, []);
 
-  // Load routes and rate limit metrics
+  // Data loading functions (same as original)
   const loadData = async (showLoadingIndicator = true) => {
     if (showLoadingIndicator) {
       setLoading(true);
     }
     setError(null);
-
     try {
-      // Load gateway routes
       const routesData = await fetchGatewayRoutes();
       setRoutes(routesData);
-
-      // Change this line from axios.get to apiClient.get
       const metricsResponse = await apiClient.get('/metrics/ratelimit');
       setRateLimitMetrics(metricsResponse.data);
-
       lastUpdatedRef.current = Date.now();
       setLastUpdated('Just now');
-
-      // If we were viewing a route's history, refresh that too
       if (selectedRouteHistory) {
         await loadRouteHistory(selectedRouteHistory.routeId);
       }
@@ -186,12 +246,9 @@ const RateLimitPage = () => {
     }
   };
 
-  // Load detailed history for a route
   const loadRouteHistory = async (routeId) => {
     setHistoryLoading(true);
-
     try {
-      // Change this line from axios.get to apiClient.get
       const response = await apiClient.get(`/metrics/ratelimit/${routeId}/history`);
       setSelectedRouteHistory(response.data);
     } catch (err) {
@@ -201,18 +258,8 @@ const RateLimitPage = () => {
     }
   };
 
-  // Handle search
-  const handleSearchChange = (e) => {
-    setSearchTerm(e.target.value);
-  };
-
-  // Filter routes based on search term
-  const filteredRoutes = rateLimitMetrics.routes?.filter(route =>
-      route.path.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      route.routeId.toLowerCase().includes(searchTerm.toLowerCase())
-  ) || [];
-
-  // Open config dialog
+  // Event handlers (same as original)
+  const handleSearchChange = (e) => setSearchTerm(e.target.value);
   const handleOpenConfigDialog = (route) => {
     setSelectedRoute(route);
     setRateLimitValues({
@@ -221,27 +268,20 @@ const RateLimitPage = () => {
     });
     setConfigDialogOpen(true);
   };
-
-  // Toggle rate limit
   const handleToggleRateLimit = async (route) => {
     try {
       const routeData = routes.find(r => r.id === route.id);
-
       if (!routeData) {
         console.error('Could not find route data for ID:', route.id);
         return;
       }
-
       const updatedRoute = {
         ...routeData,
         withRateLimit: !routeData.withRateLimit
       };
-
-      // If enabling rate limiting and no rate limit exists, create default one
       if (updatedRoute.withRateLimit && !updatedRoute.rateLimit) {
         updatedRoute.rateLimit = { maxRequests: 10, timeWindowMs: 60000 };
       }
-
       await updateGatewayRoute(route.id, updatedRoute);
       await loadData();
     } catch (error) {
@@ -249,17 +289,13 @@ const RateLimitPage = () => {
       setError('Failed to update rate limit settings');
     }
   };
-
-  // Save rate limit configuration
   const handleSaveRateLimit = async () => {
     try {
       const routeData = routes.find(r => r.id === selectedRoute.id);
-
       if (!routeData) {
         console.error('Could not find route data for ID:', selectedRoute.id);
         return;
       }
-
       const updatedRoute = {
         ...routeData,
         withRateLimit: true,
@@ -269,7 +305,6 @@ const RateLimitPage = () => {
           timeWindowMs: Number(rateLimitValues.timeWindowMs)
         }
       };
-
       await updateGatewayRoute(selectedRoute.id, updatedRoute);
       setConfigDialogOpen(false);
       await loadData();
@@ -278,48 +313,19 @@ const RateLimitPage = () => {
       setError('Failed to update rate limit');
     }
   };
-
-  // Open menu for visualizations
-  const handleMenuOpen = (event) => {
-    setMenuAnchorEl(event.currentTarget);
-  };
-
-  // Close visualization menu
-  const handleMenuClose = () => {
-    setMenuAnchorEl(null);
-  };
-
-  // Change visualization mode
+  const handleMenuOpen = (event) => setMenuAnchorEl(event.currentTarget);
+  const handleMenuClose = () => setMenuAnchorEl(null);
   const handleVisualizationChange = (mode) => {
     setVisualizationMode(mode);
     handleMenuClose();
   };
-
-  // View route history
   const handleViewHistory = (routeId) => {
     loadRouteHistory(routeId);
     setTabValue(1);
   };
+  const handleTabChange = (event, newValue) => setTabValue(newValue);
 
-  // Format time window display
-  const formatTimeWindow = (ms) => {
-    if (ms < 1000) return `${ms}ms`;
-    if (ms < 60000) return `${ms / 1000}s`;
-    return `${ms / 60000}m`;
-  };
-
-  // Format date for charts
-  const formatDate = (timestamp) => {
-    const date = new Date(timestamp);
-    return `${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
-  };
-
-  // Tab change handler
-  const handleTabChange = (event, newValue) => {
-    setTabValue(newValue);
-  };
-
-  // Get visual status for route
+  // Helper functions
   const getRouteStatus = (route) => {
     if (!route.withRateLimit) return 'disabled';
     if (route.rejectionRate > 10) return 'critical';
@@ -327,22 +333,14 @@ const RateLimitPage = () => {
     return 'healthy';
   };
 
-  // Get color for status
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'critical': return '#f44336';
-      case 'warning': return '#ff9800';
-      case 'healthy': return '#4caf50';
-      case 'disabled': return '#9e9e9e';
-      default: return '#9e9e9e';
-    }
-  };
+  const filteredRoutes = rateLimitMetrics.routes?.filter(route =>
+      route.path.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      route.routeId.toLowerCase().includes(searchTerm.toLowerCase())
+  ) || [];
 
-  // Prepare aggregate chart data
+  // Enhanced chart data preparation
   const getAggregateChartData = () => {
-    // If specific routes selected, filter the data
     let routesToShow = filteredRoutes;
-
     if (visualizationMode !== 'all') {
       routesToShow = filteredRoutes.filter(route => {
         const status = getRouteStatus(route);
@@ -350,95 +348,222 @@ const RateLimitPage = () => {
       });
     }
 
-    // Get top 5 routes by traffic
     const topRoutes = [...routesToShow]
         .sort((a, b) => (b.totalRequests || 0) - (a.totalRequests || 0))
         .slice(0, 5);
 
-    // Prepare pie chart data
     const pieData = topRoutes.map(route => ({
       name: route.routeId,
-      value: route.totalRequests || 0
+      value: route.totalRequests || 0,
+      status: getRouteStatus(route)
     }));
 
-    // Prepare bar chart data for rejection rates
     const barData = topRoutes.map(route => ({
       name: route.routeId,
-      rejectionRate: route.rejectionRate || 0
+      rejectionRate: route.rejectionRate || 0,
+      requests: route.totalRequests || 0,
+      rejections: route.totalRejections || 0
     }));
 
     return { pieData, barData };
   };
 
-  // Render charts based on visualization mode
+  // Custom Tooltip components
+  const CustomTooltip = ({ active, payload, label }) => {
+    if (active && payload && payload.length) {
+      return (
+          <Paper sx={{
+            p: 2,
+            bgcolor: 'background.paper',
+            boxShadow: 3,
+            borderLeft: `4px solid ${payload[0].fill}`
+          }}>
+            <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
+              {label}
+            </Typography>
+            {payload.map((item, index) => (
+                <Box key={index} sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                  <Box sx={{
+                    width: 12,
+                    height: 12,
+                    bgcolor: item.fill,
+                    borderRadius: '2px',
+                    mr: 1
+                  }} />
+                  <Typography variant="body2">
+                    {item.name}: <strong>{item.value}</strong>
+                  </Typography>
+                </Box>
+            ))}
+          </Paper>
+      );
+    }
+    return null;
+  };
+
+  const RejectionRateTooltip = ({ active, payload, label }) => {
+    if (active && payload && payload.length) {
+      const data = payload[0].payload;
+      return (
+          <Paper sx={{ p: 2, bgcolor: 'background.paper', boxShadow: 3 }}>
+            <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
+              {label}
+            </Typography>
+            <Typography variant="body2">
+              Requests: <strong>{data.requests}</strong>
+            </Typography>
+            <Typography variant="body2">
+              Rejections: <strong>{data.rejections}</strong>
+            </Typography>
+            <Typography variant="body2">
+              Rejection Rate: <strong>{data.rejectionRate.toFixed(2)}%</strong>
+            </Typography>
+          </Paper>
+      );
+    }
+    return null;
+  };
+
+  // Enhanced chart rendering
   const renderCharts = () => {
     const { pieData, barData } = getAggregateChartData();
 
     return (
         <Grid container spacing={3}>
-          {/* Traffic Distribution Pie Chart */}
-          <Grid item xs={12} md={6}>
+          {/* Traffic Distribution Radial Chart */}
+          <Grid item xs={12} md={4}>
             <StyledCard>
               <CardHeader
                   title="Traffic Distribution"
                   subheader="Top 5 routes by request volume"
+                  avatar={<PieChartIcon color="primary" />}
               />
               <CardContent sx={{ flexGrow: 1, minHeight: 300 }}>
                 <ResponsiveContainer width="100%" height={300}>
-                  <PieChart>
-                    <Pie
-                        data={pieData}
-                        cx="50%"
-                        cy="50%"
-                        labelLine={false}
-                        outerRadius={80}
-                        fill="#8884d8"
+                  <RadialBarChart
+                      innerRadius="20%"
+                      outerRadius="100%"
+                      data={pieData.map(item => ({
+                        ...item,
+                        fill: getStatusColor(item.status)
+                      }))}
+                      startAngle={90}
+                      endAngle={-270}
+                  >
+                    <PolarAngleAxis
+                        type="number"
+                        domain={[0, Math.max(...pieData.map(d => d.value))]}
+                        angleAxisId={0}
+                        tick={false}
+                    />
+                    <RadialBar
+                        background
                         dataKey="value"
-                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                    >
-                      {pieData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <RechartsTooltip formatter={(value) => `${value} requests`} />
-                    <Legend />
-                  </PieChart>
+                        cornerRadius={4}
+                        animationDuration={1500}
+                    />
+                    <RechartsTooltip content={<CustomTooltip />} />
+                    <Legend
+                        formatter={(value, entry, index) => (
+                            <span style={{ color: chartTheme.textColor }}>
+                        {pieData[index].name}
+                      </span>
+                        )}
+                    />
+                  </RadialBarChart>
                 </ResponsiveContainer>
               </CardContent>
             </StyledCard>
           </Grid>
 
           {/* Rejection Rates Bar Chart */}
-          <Grid item xs={12} md={6}>
+          <Grid item xs={12} md={4}>
             <StyledCard>
               <CardHeader
                   title="Rejection Rates"
                   subheader="Percentage of rejected requests"
+                  avatar={<BarChartIcon color="primary" />}
               />
               <CardContent sx={{ flexGrow: 1, minHeight: 300 }}>
                 <ResponsiveContainer width="100%" height={300}>
                   <BarChart data={barData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="name" />
-                    <YAxis unit="%" />
-                    <RechartsTooltip formatter={(value) => `${value}%`} />
+                    <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridColor} />
+                    <XAxis
+                        dataKey="name"
+                        tick={{ fill: chartTheme.textColor }}
+                        axisLine={{ stroke: chartTheme.axisColor }}
+                    />
+                    <YAxis
+                        unit="%"
+                        tick={{ fill: chartTheme.textColor }}
+                        axisLine={{ stroke: chartTheme.axisColor }}
+                    />
+                    <RechartsTooltip content={<RejectionRateTooltip />} />
                     <Bar
                         dataKey="rejectionRate"
-                        fill="#8884d8"
-                        background={{ fill: '#eee' }}
-                        isAnimationActive={true}
+                        name="Rejection Rate"
+                        radius={[4, 4, 0, 0]}
+                        animationDuration={1500}
                     >
-                      {barData.map((entry, index) => {
-                        const { rejectionRate } = entry;
-                        let color = '#4caf50';
-
-                        if (rejectionRate > 5) color = '#ff9800';
-                        if (rejectionRate > 10) color = '#f44336';
-
-                        return <Cell key={`cell-${index}`} fill={color} />;
-                      })}
+                      {barData.map((entry, index) => (
+                          <Cell
+                              key={`cell-${index}`}
+                              fill={getStatusColor(getRouteStatus(entry))}
+                          />
+                      ))}
                     </Bar>
                   </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </StyledCard>
+          </Grid>
+
+          {/* Status Distribution Pie Chart */}
+          <Grid item xs={12} md={4}>
+            <StyledCard>
+              <CardHeader
+                  title="Status Overview"
+                  subheader="Distribution of route statuses"
+                  avatar={<TrafficIcon color="primary" />}
+              />
+              <CardContent sx={{ flexGrow: 1, minHeight: 300 }}>
+                <ResponsiveContainer width="100%" height={300}>
+                  <PieChart>
+                    <Pie
+                        data={[
+                          { name: 'Healthy', value: filteredRoutes.filter(r => getRouteStatus(r) === 'healthy').length, color: getStatusColor('healthy') },
+                          { name: 'Warning', value: filteredRoutes.filter(r => getRouteStatus(r) === 'warning').length, color: getStatusColor('warning') },
+                          { name: 'Critical', value: filteredRoutes.filter(r => getRouteStatus(r) === 'critical').length, color: getStatusColor('critical') },
+                          { name: 'Disabled', value: filteredRoutes.filter(r => getRouteStatus(r) === 'disabled').length, color: getStatusColor('disabled') }
+                        ]}
+                        cx="50%"
+                        cy="50%"
+                        labelLine={false}
+                        outerRadius={80}
+                        innerRadius={40}
+                        paddingAngle={5}
+                        dataKey="value"
+                        label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                    >
+                      {['healthy', 'warning', 'critical', 'disabled'].map((status, index) => (
+                          <Cell key={`cell-${index}`} fill={getStatusColor(status)} />
+                      ))}
+                    </Pie>
+                    <RechartsTooltip
+                        formatter={(value, name, props) => [
+                          value,
+                          name,
+                          props.payload.payload.color
+                        ]}
+                        contentStyle={{
+                          backgroundColor: chartTheme.tooltipBg,
+                          border: 'none',
+                          borderRadius: '8px'
+                        }}
+                        itemStyle={{ color: chartTheme.tooltipColor }}
+                    />
+                    <Legend />
+                  </PieChart>
                 </ResponsiveContainer>
               </CardContent>
             </StyledCard>
@@ -447,84 +572,151 @@ const RateLimitPage = () => {
     );
   };
 
-  // Render the route history detail view
+  // Enhanced route history view
   const renderRouteHistory = () => {
     if (!selectedRouteHistory) {
       return (
-          <Box sx={{ textAlign: 'center', py: 10 }}>
+          <Box sx={{
+            textAlign: 'center',
+            py: 10,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center'
+          }}>
+            <TimelineIcon sx={{ fontSize: 60, color: 'text.disabled', mb: 2 }} />
             <Typography variant="subtitle1" color="textSecondary">
               Select a route to view detailed history
+            </Typography>
+            <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
+              Click on a route's timeline icon to view its historical data
             </Typography>
           </Box>
       );
     }
 
     const { routeId, path, history, maxRequests, timeWindowMs } = selectedRouteHistory;
-
-    // Format history data for charts
     const historyData = history.map(point => ({
       timestamp: point.timestamp,
       time: formatDate(point.timestamp),
       requests: point.requests,
       rejections: point.rejections,
-      accepted: point.requests - point.rejections
+      accepted: point.requests - point.rejections,
+      rejectionRate: point.requests > 0 ? (point.rejections / point.requests) * 100 : 0
     }));
+
+    const currentRate = historyData[historyData.length - 1]?.rejectionRate || 0;
+    const status = currentRate > 10 ? 'critical' : currentRate > 5 ? 'warning' : 'healthy';
 
     return (
         <Box>
-          <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Box sx={{
+            mb: 3,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            bgcolor: 'background.paper',
+            p: 3,
+            borderRadius: '12px',
+            boxShadow: 1
+          }}>
             <Box>
-              <Typography variant="h6">
-                {path}
-              </Typography>
-              <Typography variant="subtitle2" color="textSecondary">
-                Route ID: {routeId}
-              </Typography>
-              {maxRequests && (
-                  <Typography variant="body2">
-                    Limit: {maxRequests} requests per {formatTimeWindow(timeWindowMs)}
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                <StatusBadge
+                    overlap="circular"
+                    anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                    variant="dot"
+                    status={status}
+                    sx={{ mr: 2 }}
+                >
+                  <Avatar sx={{ bgcolor: getStatusColor(status) }}>
+                    {status === 'healthy' ? <CheckIcon /> :
+                        status === 'warning' ? <WarningIcon /> : <BlockIcon />}
+                  </Avatar>
+                </StatusBadge>
+                <Box>
+                  <Typography variant="h6" fontWeight="bold">
+                    {path}
                   </Typography>
+                  <Typography variant="body2" color="textSecondary">
+                    Route ID: {routeId}
+                  </Typography>
+                </Box>
+              </Box>
+              {maxRequests && (
+                  <Box sx={{ mt: 2 }}>
+                    <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center' }}>
+                      <SpeedIcon color="action" sx={{ mr: 1, fontSize: '1rem' }} />
+                      Current limit: {maxRequests} requests per {formatTimeWindow(timeWindowMs)}
+                    </Typography>
+                  </Box>
               )}
             </Box>
             <Button
                 startIcon={<RefreshIcon />}
-                variant="outlined"
+                variant="contained"
                 onClick={() => loadRouteHistory(routeId)}
                 disabled={historyLoading}
+                sx={{ borderRadius: '8px' }}
             >
-              {historyLoading ? 'Loading...' : 'Refresh'}
+              {historyLoading ? 'Loading...' : 'Refresh Data'}
             </Button>
           </Box>
 
           {/* Request vs Rejection Over Time */}
           <StyledCard sx={{ mb: 3 }}>
-            <CardHeader title="Traffic Over Time" />
+            <CardHeader
+                title="Traffic Over Time"
+                avatar={<LineChartIcon color="primary" />}
+            />
             <CardContent>
               <ResponsiveContainer width="100%" height={300}>
                 <AreaChart data={historyData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="time" />
-                  <YAxis />
+                  <defs>
+                    <linearGradient id="acceptedGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#10B981" stopOpacity={0.8}/>
+                      <stop offset="95%" stopColor="#10B981" stopOpacity={0}/>
+                    </linearGradient>
+                    <linearGradient id="rejectedGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#EF4444" stopOpacity={0.8}/>
+                      <stop offset="95%" stopColor="#EF4444" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridColor} />
+                  <XAxis
+                      dataKey="time"
+                      tick={{ fill: chartTheme.textColor }}
+                      axisLine={{ stroke: chartTheme.axisColor }}
+                  />
+                  <YAxis
+                      tick={{ fill: chartTheme.textColor }}
+                      axisLine={{ stroke: chartTheme.axisColor }}
+                  />
                   <RechartsTooltip
-                      formatter={(value, name) => [value, name === 'accepted' ? 'Accepted Requests' : 'Rejected Requests']}
+                      content={<CustomTooltip />}
+                      contentStyle={{
+                        backgroundColor: chartTheme.tooltipBg,
+                        border: 'none',
+                        borderRadius: '8px'
+                      }}
+                      itemStyle={{ color: chartTheme.tooltipColor }}
                   />
                   <Legend />
                   <Area
                       type="monotone"
                       dataKey="accepted"
                       stackId="1"
-                      stroke="#4caf50"
-                      fill="#4caf50"
-                      fillOpacity={0.6}
+                      stroke="#10B981"
+                      fillOpacity={1}
+                      fill="url(#acceptedGradient)"
                       name="Accepted"
                   />
                   <Area
                       type="monotone"
                       dataKey="rejections"
                       stackId="1"
-                      stroke="#f44336"
-                      fill="#f44336"
-                      fillOpacity={0.6}
+                      stroke="#EF4444"
+                      fillOpacity={1}
+                      fill="url(#rejectedGradient)"
                       name="Rejected"
                   />
                 </AreaChart>
@@ -534,25 +726,49 @@ const RateLimitPage = () => {
 
           {/* Rejection Rate Over Time */}
           <StyledCard>
-            <CardHeader title="Rejection Rate Over Time" />
+            <CardHeader
+                title="Rejection Rate Trend"
+                avatar={<LineChartIcon color="primary" />}
+                action={
+                  <PercentageChip
+                      value={currentRate}
+                      label={`Current: ${currentRate.toFixed(2)}%`}
+                      size="medium"
+                      sx={{ mr: 2 }}
+                  />
+                }
+            />
             <CardContent>
               <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={historyData.map(point => ({
-                  ...point,
-                  rejectionRate: point.requests > 0
-                      ? (point.rejections / point.requests) * 100
-                      : 0
-                }))}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="time" />
-                  <YAxis unit="%" />
-                  <RechartsTooltip formatter={(value) => `${value.toFixed(2)}%`} />
+                <LineChart data={historyData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridColor} />
+                  <XAxis
+                      dataKey="time"
+                      tick={{ fill: chartTheme.textColor }}
+                      axisLine={{ stroke: chartTheme.axisColor }}
+                  />
+                  <YAxis
+                      unit="%"
+                      tick={{ fill: chartTheme.textColor }}
+                      axisLine={{ stroke: chartTheme.axisColor }}
+                  />
+                  <RechartsTooltip
+                      formatter={(value) => [`${value.toFixed(2)}%`, 'Rejection Rate']}
+                      labelFormatter={(label) => `Time: ${label}`}
+                      contentStyle={{
+                        backgroundColor: chartTheme.tooltipBg,
+                        border: 'none',
+                        borderRadius: '8px'
+                      }}
+                      itemStyle={{ color: chartTheme.tooltipColor }}
+                  />
                   <Line
                       type="monotone"
                       dataKey="rejectionRate"
-                      stroke="#ff9800"
-                      dot={{ r: 4 }}
-                      activeDot={{ r: 6 }}
+                      stroke="#F59E0B"
+                      strokeWidth={2}
+                      dot={{ r: 2 }}
+                      activeDot={{ r: 6, strokeWidth: 2 }}
                       isAnimationActive={false}
                   />
                 </LineChart>
@@ -566,10 +782,22 @@ const RateLimitPage = () => {
   return (
       <Box sx={{ p: 3 }}>
         {/* Header and controls */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-          <Typography variant="h5" component="h1">
-            Rate Limit Management
-          </Typography>
+        <Box sx={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          mb: 3,
+          flexWrap: 'wrap',
+          gap: 2
+        }}>
+          <Box>
+            <Typography variant="h4" component="h1" fontWeight="bold">
+              Rate Limit Dashboard
+            </Typography>
+            <Typography variant="caption" color="textSecondary">
+              Monitor and manage API rate limiting configurations
+            </Typography>
+          </Box>
 
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
             <FormControlLabel
@@ -578,26 +806,32 @@ const RateLimitPage = () => {
                       checked={autoRefresh}
                       onChange={(e) => setAutoRefresh(e.target.checked)}
                       color="primary"
+                      size="small"
                   />
                 }
                 label="Auto-refresh"
+                labelPlacement="start"
+                sx={{ mr: 0 }}
             />
 
             <Button
-                variant="outlined"
+                variant="contained"
                 startIcon={<RefreshIcon />}
                 onClick={() => loadData()}
                 disabled={loading}
+                sx={{ borderRadius: '8px' }}
             >
               Refresh
             </Button>
 
-            <IconButton
-                aria-label="visualization options"
+            <Button
+                variant="outlined"
+                startIcon={<BarChartIcon />}
                 onClick={handleMenuOpen}
+                sx={{ borderRadius: '8px' }}
             >
-              <MoreVertIcon />
-            </IconButton>
+              Filter
+            </Button>
 
             <Menu
                 anchorEl={menuAnchorEl}
@@ -607,44 +841,114 @@ const RateLimitPage = () => {
               <MenuItem
                   onClick={() => handleVisualizationChange('all')}
                   selected={visualizationMode === 'all'}
+                  sx={{ minWidth: '180px' }}
               >
-                All Routes
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <Box sx={{ width: 12, height: 12, bgcolor: 'text.primary', borderRadius: '2px', mr: 1.5 }} />
+                  All Routes
+                </Box>
               </MenuItem>
               <MenuItem
                   onClick={() => handleVisualizationChange('healthy')}
                   selected={visualizationMode === 'healthy'}
+                  sx={{ minWidth: '180px' }}
               >
-                <Box component="span" sx={{ color: getStatusColor('healthy'), mr: 1 }}>●</Box> Healthy
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <Box sx={{ width: 12, height: 12, bgcolor: getStatusColor('healthy'), borderRadius: '2px', mr: 1.5 }} />
+                  Healthy
+                </Box>
               </MenuItem>
               <MenuItem
                   onClick={() => handleVisualizationChange('warning')}
                   selected={visualizationMode === 'warning'}
+                  sx={{ minWidth: '180px' }}
               >
-                <Box component="span" sx={{ color: getStatusColor('warning'), mr: 1 }}>●</Box> Warning
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <Box sx={{ width: 12, height: 12, bgcolor: getStatusColor('warning'), borderRadius: '2px', mr: 1.5 }} />
+                  Warning
+                </Box>
               </MenuItem>
               <MenuItem
                   onClick={() => handleVisualizationChange('critical')}
                   selected={visualizationMode === 'critical'}
+                  sx={{ minWidth: '180px' }}
               >
-                <Box component="span" sx={{ color: getStatusColor('critical'), mr: 1 }}>●</Box> Critical
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <Box sx={{ width: 12, height: 12, bgcolor: getStatusColor('critical'), borderRadius: '2px', mr: 1.5 }} />
+                  Critical
+                </Box>
               </MenuItem>
               <MenuItem
                   onClick={() => handleVisualizationChange('disabled')}
                   selected={visualizationMode === 'disabled'}
+                  sx={{ minWidth: '180px' }}
               >
-                <Box component="span" sx={{ color: getStatusColor('disabled'), mr: 1 }}>●</Box> Disabled
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <Box sx={{ width: 12, height: 12, bgcolor: getStatusColor('disabled'), borderRadius: '2px', mr: 1.5 }} />
+                  Disabled
+                </Box>
               </MenuItem>
             </Menu>
           </Box>
         </Box>
 
-        <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mb: 3 }}>
-          Last updated: {lastUpdated}
-        </Typography>
+        <Box sx={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          mb: 3,
+          flexWrap: 'wrap',
+          gap: 2
+        }}>
+          <Typography variant="caption" color="textSecondary">
+            Last updated: {lastUpdated}
+          </Typography>
+
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Box sx={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              bgcolor: getStatusColor('healthy')
+            }} />
+            <Typography variant="caption" color="textSecondary">Healthy</Typography>
+
+            <Box sx={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              bgcolor: getStatusColor('warning'),
+              ml: 1
+            }} />
+            <Typography variant="caption" color="textSecondary">Warning</Typography>
+
+            <Box sx={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              bgcolor: getStatusColor('critical'),
+              ml: 1
+            }} />
+            <Typography variant="caption" color="textSecondary">Critical</Typography>
+
+            <Box sx={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              bgcolor: getStatusColor('disabled'),
+              ml: 1
+            }} />
+            <Typography variant="caption" color="textSecondary">Disabled</Typography>
+          </Box>
+        </Box>
 
         {/* Error message */}
         {error && (
-            <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
+            <Alert
+                severity="error"
+                sx={{ mb: 3, borderRadius: '8px' }}
+                onClose={() => setError(null)}
+            >
               {error}
             </Alert>
         )}
@@ -654,15 +958,31 @@ const RateLimitPage = () => {
           <Grid item xs={12} md={4}>
             <StyledCard>
               <CardContent>
-                <Typography variant="subtitle1" color="textSecondary" gutterBottom>
-                  Total Traffic
-                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                  <TrafficIcon color="primary" sx={{ mr: 1 }} />
+                  <Typography variant="subtitle1" color="textSecondary">
+                    Total Traffic
+                  </Typography>
+                </Box>
                 <MetricValue>
                   {rateLimitMetrics.summary?.totalRequests.toLocaleString() || '0'}
                 </MetricValue>
                 <Typography variant="body2" color="textSecondary">
                   Total requests processed
                 </Typography>
+                <LinearProgress
+                    variant="determinate"
+                    value={100}
+                    sx={{
+                      mt: 2,
+                      height: 4,
+                      borderRadius: 2,
+                      bgcolor: 'action.selected',
+                      '& .MuiLinearProgress-bar': {
+                        bgcolor: 'primary.main'
+                      }
+                    }}
+                />
               </CardContent>
             </StyledCard>
           </Grid>
@@ -670,15 +990,31 @@ const RateLimitPage = () => {
           <Grid item xs={12} md={4}>
             <StyledCard>
               <CardContent>
-                <Typography variant="subtitle1" color="textSecondary" gutterBottom>
-                  Rate Limited
-                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                  <BlockIcon color="primary" sx={{ mr: 1 }} />
+                  <Typography variant="subtitle1" color="textSecondary">
+                    Rate Limited
+                  </Typography>
+                </Box>
                 <MetricValue>
                   {rateLimitMetrics.summary?.totalRejections.toLocaleString() || '0'}
                 </MetricValue>
                 <Typography variant="body2" color="textSecondary">
                   Requests rejected due to rate limits
                 </Typography>
+                <LinearProgress
+                    variant="determinate"
+                    value={Math.min(100, rateLimitMetrics.summary?.rejectionRate || 0)}
+                    sx={{
+                      mt: 2,
+                      height: 4,
+                      borderRadius: 2,
+                      bgcolor: 'action.selected',
+                      '& .MuiLinearProgress-bar': {
+                        bgcolor: 'error.main'
+                      }
+                    }}
+                />
               </CardContent>
             </StyledCard>
           </Grid>
@@ -686,9 +1022,12 @@ const RateLimitPage = () => {
           <Grid item xs={12} md={4}>
             <StyledCard>
               <CardContent>
-                <Typography variant="subtitle1" color="textSecondary" gutterBottom>
-                  Rejection Rate
-                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                  <SpeedIcon color="primary" sx={{ mr: 1 }} />
+                  <Typography variant="subtitle1" color="textSecondary">
+                    Rejection Rate
+                  </Typography>
+                </Box>
                 <Box sx={{ display: 'flex', alignItems: 'center' }}>
                   <MetricValue>
                     {rateLimitMetrics.summary?.rejectionRate.toLocaleString() || '0'}%
@@ -712,21 +1051,47 @@ const RateLimitPage = () => {
                 <Typography variant="body2" color="textSecondary">
                   Percentage of rejected requests
                 </Typography>
+                <LinearProgress
+                    variant="determinate"
+                    value={Math.min(100, rateLimitMetrics.summary?.rejectionRate || 0)}
+                    sx={{
+                      mt: 2,
+                      height: 4,
+                      borderRadius: 2,
+                      bgcolor: 'action.selected',
+                      '& .MuiLinearProgress-bar': {
+                        bgcolor: rateLimitMetrics.summary?.rejectionRate > 10
+                            ? 'error.main'
+                            : rateLimitMetrics.summary?.rejectionRate > 5
+                                ? 'warning.main'
+                                : 'success.main'
+                      }
+                    }}
+                />
               </CardContent>
             </StyledCard>
           </Grid>
         </Grid>
 
         {/* Tabs for Dashboard and Route Details */}
-        <Paper sx={{ mb: 3 }}>
+        <Paper sx={{ mb: 3, borderRadius: '12px', overflow: 'hidden' }}>
           <Tabs
               value={tabValue}
               onChange={handleTabChange}
               indicatorColor="primary"
               textColor="primary"
+              variant="fullWidth"
           >
-            <Tab label="Dashboard" />
-            <Tab label="Route History" />
+            <Tab
+                label="Dashboard Overview"
+                icon={<BarChartIcon fontSize="small" />}
+                iconPosition="start"
+            />
+            <Tab
+                label="Route Analytics"
+                icon={<TimelineIcon fontSize="small" />}
+                iconPosition="start"
+            />
           </Tabs>
         </Paper>
 
@@ -736,7 +1101,7 @@ const RateLimitPage = () => {
               {/* Search bar */}
               <Box sx={{ mb: 3 }}>
                 <TextField
-                    placeholder="Search routes..."
+                    placeholder="Search routes by path or ID..."
                     variant="outlined"
                     size="small"
                     fullWidth
@@ -748,6 +1113,7 @@ const RateLimitPage = () => {
                             <SearchIcon />
                           </InputAdornment>
                       ),
+                      sx: { borderRadius: '8px' }
                     }}
                 />
               </Box>
@@ -756,30 +1122,53 @@ const RateLimitPage = () => {
               {renderCharts()}
 
               {/* Routes Table */}
-              <TableContainer component={Paper} sx={{ mt: 3 }}>
+              <TableContainer
+                  component={Paper}
+                  sx={{
+                    mt: 3,
+                    borderRadius: '12px',
+                    boxShadow: 2
+                  }}
+              >
                 <Table size="small">
                   <TableHead>
-                    <TableRow>
-                      <TableCell>Status</TableCell>
-                      <TableCell>Route Path</TableCell>
-                      <TableCell align="right">Limit</TableCell>
-                      <TableCell align="right">Requests</TableCell>
-                      <TableCell align="right">Rejected</TableCell>
-                      <TableCell align="right">Rejection Rate</TableCell>
-                      <TableCell align="right">Actions</TableCell>
+                    <TableRow sx={{ bgcolor: 'action.hover' }}>
+                      <TableCell sx={{ fontWeight: 'bold' }}>Status</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold' }}>Route Path</TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 'bold' }}>Limit</TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 'bold' }}>Requests</TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 'bold' }}>Rejected</TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 'bold' }}>Rejection Rate</TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 'bold' }}>Actions</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {loading ? (
                         <TableRow>
-                          <TableCell colSpan={7} align="center">
+                          <TableCell colSpan={7} align="center" sx={{ py: 4 }}>
                             <CircularProgress size={24} />
+                            <Typography variant="body2" sx={{ mt: 1 }}>
+                              Loading route data...
+                            </Typography>
                           </TableCell>
                         </TableRow>
                     ) : filteredRoutes.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={7} align="center">
-                            No rate limited routes found
+                          <TableCell colSpan={7} align="center" sx={{ py: 4 }}>
+                            <Box sx={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'center',
+                              color: 'text.secondary'
+                            }}>
+                              <SearchIcon sx={{ fontSize: 48, mb: 1 }} />
+                              <Typography variant="body1">
+                                No matching routes found
+                              </Typography>
+                              <Typography variant="body2">
+                                Try adjusting your search query
+                              </Typography>
+                            </Box>
                           </TableCell>
                         </TableRow>
                     ) : (
@@ -787,39 +1176,81 @@ const RateLimitPage = () => {
                           const status = getRouteStatus(route);
 
                           return (
-                              <TableRow key={route.id} hover>
+                              <TableRow
+                                  key={route.id}
+                                  hover
+                                  sx={{
+                                    '&:last-child td': { borderBottom: 0 },
+                                    '&:hover': {
+                                      bgcolor: 'action.hover'
+                                    }
+                                  }}
+                              >
                                 <TableCell>
-                                  <Box
-                                      sx={{
-                                        width: 12,
-                                        height: 12,
-                                        borderRadius: '50%',
-                                        backgroundColor: getStatusColor(status),
-                                        display: 'inline-block',
-                                        mr: 1
-                                      }}
-                                  />
-                                  {status === 'disabled' ? 'Disabled' :
-                                      status === 'critical' ? 'Critical' :
-                                          status === 'warning' ? 'Warning' : 'Healthy'}
+                                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                                    <StatusBadge
+                                        overlap="circular"
+                                        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                                        variant="dot"
+                                        status={status}
+                                        sx={{ mr: 1 }}
+                                    >
+                                      <Box sx={{
+                                        width: 24,
+                                        height: 24,
+                                        borderRadius: '4px',
+                                        bgcolor: `${getStatusColor(status)}20`,
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center'
+                                      }}>
+                                        {status === 'disabled' ? <CloseIcon fontSize="small" sx={{ color: getStatusColor(status) }} /> :
+                                            status === 'critical' ? <WarningIcon fontSize="small" sx={{ color: getStatusColor(status) }} /> :
+                                                status === 'warning' ? <WarningIcon fontSize="small" sx={{ color: getStatusColor(status) }} /> :
+                                                    <CheckIcon fontSize="small" sx={{ color: getStatusColor(status) }} />}
+                                      </Box>
+                                    </StatusBadge>
+                                    <Typography variant="body2">
+                                      {status === 'disabled' ? 'Disabled' :
+                                          status === 'critical' ? 'Critical' :
+                                              status === 'warning' ? 'Warning' : 'Healthy'}
+                                    </Typography>
+                                  </Box>
                                 </TableCell>
                                 <TableCell>
                                   <Tooltip title={`Route ID: ${route.routeId}`}>
                                     <Box component="span" sx={{ cursor: 'help' }}>
-                                      {route.path}
+                                      <Typography variant="body2" noWrap>
+                                        {route.path}
+                                      </Typography>
                                     </Box>
                                   </Tooltip>
                                 </TableCell>
                                 <TableCell align="right">
                                   {route.withRateLimit && route.rateLimit ?
-                                      `${route.rateLimit.maxRequests}/${formatTimeWindow(route.rateLimit.timeWindowMs)}` :
-                                      'N/A'}
+                                      <Chip
+                                          label={`${route.rateLimit.maxRequests}/${formatTimeWindow(route.rateLimit.timeWindowMs)}`}
+                                          size="small"
+                                          variant="outlined"
+                                          sx={{ borderRadius: '4px' }}
+                                      /> :
+                                      <Chip
+                                          label="N/A"
+                                          size="small"
+                                          variant="outlined"
+                                          sx={{ borderRadius: '4px' }}
+                                      />
+                                  }
                                 </TableCell>
                                 <TableCell align="right">
-                                  {route.totalRequests || 0}
+                                  <Typography variant="body2">
+                                    {route.totalRequests?.toLocaleString() || '0'}
+                                  </Typography>
                                 </TableCell>
                                 <TableCell align="right">
-                                  {route.totalRejections || 0}
+                                  <Typography variant="body2" color="error.main">
+                                    {route.totalRejections?.toLocaleString() || '0'}
+                                  </Typography>
                                 </TableCell>
                                 <TableCell align="right">
                                   <PercentageChip
@@ -829,38 +1260,53 @@ const RateLimitPage = () => {
                                   />
                                 </TableCell>
                                 <TableCell align="right">
-                                  <Tooltip title="View detailed history">
-                                    <IconButton
-                                        size="small"
-                                        onClick={() => handleViewHistory(route.routeId)}
-                                    >
-                                      <TimelineIcon fontSize="small" />
-                                    </IconButton>
-                                  </Tooltip>
+                                  <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
+                                    <Tooltip title="View detailed analytics">
+                                      <IconButton
+                                          size="small"
+                                          onClick={() => handleViewHistory(route.routeId)}
+                                          sx={{
+                                            bgcolor: 'primary.light',
+                                            '&:hover': { bgcolor: 'primary.main', color: 'white' }
+                                          }}
+                                      >
+                                        <TimelineIcon fontSize="small" />
+                                      </IconButton>
+                                    </Tooltip>
 
-                                  <Tooltip title={route.withRateLimit ? "Configure rate limit" : "Enable rate limiting"}>
-                                    <IconButton
-                                        size="small"
-                                        onClick={() => route.withRateLimit ?
-                                            handleOpenConfigDialog(route) :
-                                            handleToggleRateLimit(route)}
-                                        color={route.withRateLimit ? "primary" : "default"}
-                                    >
-                                      <SettingsIcon fontSize="small" />
-                                    </IconButton>
-                                  </Tooltip>
+                                    <Tooltip title={route.withRateLimit ? "Configure rate limit" : "Enable rate limiting"}>
+                                      <IconButton
+                                          size="small"
+                                          onClick={() => route.withRateLimit ?
+                                              handleOpenConfigDialog(route) :
+                                              handleToggleRateLimit(route)}
+                                          sx={{
+                                            bgcolor: route.withRateLimit ? 'primary.light' : 'action.selected',
+                                            '&:hover': {
+                                              bgcolor: route.withRateLimit ? 'primary.main' : 'action.hover',
+                                              color: route.withRateLimit ? 'white' : 'inherit'
+                                            }
+                                          }}
+                                      >
+                                        <SettingsIcon fontSize="small" />
+                                      </IconButton>
+                                    </Tooltip>
 
-                                  {route.withRateLimit && (
-                                      <Tooltip title="Disable rate limiting">
-                                        <IconButton
-                                            size="small"
-                                            onClick={() => handleToggleRateLimit(route)}
-                                            color="warning"
-                                        >
-                                          <CloseIcon fontSize="small" />
-                                        </IconButton>
-                                      </Tooltip>
-                                  )}
+                                    {route.withRateLimit && (
+                                        <Tooltip title="Disable rate limiting">
+                                          <IconButton
+                                              size="small"
+                                              onClick={() => handleToggleRateLimit(route)}
+                                              sx={{
+                                                bgcolor: 'error.light',
+                                                '&:hover': { bgcolor: 'error.main', color: 'white' }
+                                              }}
+                                          >
+                                            <CloseIcon fontSize="small" />
+                                          </IconButton>
+                                        </Tooltip>
+                                    )}
+                                  </Box>
                                 </TableCell>
                               </TableRow>
                           );
@@ -881,61 +1327,94 @@ const RateLimitPage = () => {
             onClose={() => setConfigDialogOpen(false)}
             maxWidth="sm"
             fullWidth
+            PaperProps={{ sx: { borderRadius: '12px' } }}
         >
-          <DialogTitle>Configure Rate Limit</DialogTitle>
-          <DialogContent>
-            <Box sx={{ pt: 2 }}>
-              <Typography variant="subtitle1" gutterBottom>
+          <DialogTitle sx={{
+            bgcolor: 'primary.main',
+            color: 'primary.contrastText',
+            display: 'flex',
+            alignItems: 'center'
+          }}>
+            <SettingsIcon sx={{ mr: 1 }} />
+            Configure Rate Limit
+          </DialogTitle>
+          <DialogContent sx={{ pt: 3 }}>
+            <Box>
+              <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
                 {selectedRoute?.path}
               </Typography>
-
-              <TextField
-                  label="Maximum Requests"
-                  type="number"
-                  fullWidth
-                  margin="normal"
-                  value={rateLimitValues.maxRequests}
-                  onChange={(e) => setRateLimitValues({
-                    ...rateLimitValues,
-                    maxRequests: Math.max(1, Number(e.target.value))
-                  })}
-                  InputProps={{
-                    inputProps: { min: 1 }
-                  }}
-                  helperText="Maximum number of requests allowed within the time window"
-              />
-
-              <TextField
-                  label="Time Window (milliseconds)"
-                  type="number"
-                  fullWidth
-                  margin="normal"
-                  value={rateLimitValues.timeWindowMs}
-                  onChange={(e) => setRateLimitValues({
-                    ...rateLimitValues,
-                    timeWindowMs: Math.max(1000, Number(e.target.value))
-                  })}
-                  InputProps={{
-                    inputProps: { min: 1000, step: 1000 }
-                  }}
-                  helperText="Time window in milliseconds (e.g., 60000 = 1 minute)"
-              />
-
-              <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
-                This will allow {rateLimitValues.maxRequests} requests per {formatTimeWindow(rateLimitValues.timeWindowMs)}.
+              <Typography variant="body2" color="textSecondary" gutterBottom>
+                Route ID: {selectedRoute?.routeId}
               </Typography>
+
+              <Box sx={{ mt: 3, mb: 2 }}>
+                <TextField
+                    label="Maximum Requests"
+                    type="number"
+                    fullWidth
+                    margin="normal"
+                    value={rateLimitValues.maxRequests}
+                    onChange={(e) => setRateLimitValues({
+                      ...rateLimitValues,
+                      maxRequests: Math.max(1, Number(e.target.value))
+                    })}
+                    InputProps={{
+                      inputProps: { min: 1 },
+                      sx: { borderRadius: '8px' }
+                    }}
+                    helperText="Maximum number of requests allowed within the time window"
+                    variant="outlined"
+                />
+
+                <TextField
+                    label="Time Window (milliseconds)"
+                    type="number"
+                    fullWidth
+                    margin="normal"
+                    value={rateLimitValues.timeWindowMs}
+                    onChange={(e) => setRateLimitValues({
+                      ...rateLimitValues,
+                      timeWindowMs: Math.max(1000, Number(e.target.value))
+                    })}
+                    InputProps={{
+                      inputProps: { min: 1000, step: 1000 },
+                      sx: { borderRadius: '8px' }
+                    }}
+                    helperText="Time window in milliseconds (e.g., 60000 = 1 minute)"
+                    variant="outlined"
+                />
+
+                <Box sx={{
+                  mt: 3,
+                  p: 2,
+                  bgcolor: 'action.selected',
+                  borderRadius: '8px'
+                }}>
+                  <Typography variant="body2" fontWeight="bold">
+                    New Rate Limit:
+                  </Typography>
+                  <Typography variant="body2">
+                    {rateLimitValues.maxRequests} requests per {formatTimeWindow(rateLimitValues.timeWindowMs)}
+                  </Typography>
+                </Box>
+              </Box>
             </Box>
           </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setConfigDialogOpen(false)}>
+          <DialogActions sx={{ p: 2 }}>
+            <Button
+                onClick={() => setConfigDialogOpen(false)}
+                variant="outlined"
+                sx={{ borderRadius: '8px' }}
+            >
               Cancel
             </Button>
             <Button
                 onClick={handleSaveRateLimit}
                 variant="contained"
                 color="primary"
+                sx={{ borderRadius: '8px' }}
             >
-              Save Changes
+              Save Configuration
             </Button>
           </DialogActions>
         </Dialog>
