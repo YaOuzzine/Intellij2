@@ -41,19 +41,24 @@ public class UserController {
 
     @GetMapping("/profile")
     public Mono<ResponseEntity<?>> getCurrentUserProfile() {
+        logger.info("Received request to /api/user/profile");
         return ReactiveSecurityContextHolder.getContext()
                 .map(SecurityContext::getAuthentication)
                 .flatMap(authentication -> {
                     try {
-                        String username = authentication.getName();
-                        System.out.println("Authentication principal: " + authentication.getPrincipal());
-                        System.out.println("Username from authentication: " + username);
-                        System.out.println("Authorities: " + authentication.getAuthorities());
+                        logger.info("Authentication found: {}", authentication);
+                        logger.info("Authentication type: {}", authentication.getClass().getName());
+                        logger.info("Authentication principal type: {}", authentication.getPrincipal().getClass().getName());
+                        logger.info("Authentication principal: {}", authentication.getPrincipal());
+                        logger.info("Username from authentication: {}", authentication.getName());
+                        logger.info("Authorities: {}", authentication.getAuthorities());
 
+                        String username = authentication.getName();
                         UserDTO userDTO = userService.getUserByUsername(username);
+                        logger.info("Successfully retrieved user profile for: {}", username);
                         return Mono.just(ResponseEntity.ok(userDTO));
                     } catch (Exception e) {
-                        e.printStackTrace();
+                        logger.error("Error retrieving user profile: {}", e.getMessage(), e);
                         Map<String, String> errorResponse = new HashMap<>();
                         errorResponse.put("error", "Failed to retrieve user profile");
                         errorResponse.put("message", e.getMessage());
@@ -61,6 +66,7 @@ public class UserController {
                         return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse));
                     }
                 })
+                .doOnError(e -> logger.error("Error processing authentication context: {}", e.getMessage(), e))
                 .defaultIfEmpty(ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                         .body(Map.of("error", "No authentication found", "message", "User not authenticated")));
     }

@@ -1,6 +1,7 @@
 // gateway-admin/src/main/java/com/example/gateway_admin/Config/SecurityConfig.java
 package com.example.gateway_admin.Config;
 
+import org.springframework.core.convert.converter.Converter;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -8,14 +9,18 @@ import org.slf4j.LoggerFactory;
 // Remove: import org.springframework.beans.factory.annotation.Value; // Not needed for dummy decoder
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.AbstractAuthenticationToken;
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
 import org.springframework.security.config.web.server.ServerHttpSecurity;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jwt.Jwt; // Import Jwt
 import org.springframework.security.oauth2.jwt.JwtException; // Import JwtException
 // Remove: import org.springframework.security.oauth2.jwt.NimbusReactiveJwtDecoder; // Not used
 import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
+import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
+import org.springframework.security.oauth2.server.resource.authentication.ReactiveJwtAuthenticationConverter;
 import org.springframework.security.web.server.SecurityWebFilterChain;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.reactive.CorsConfigurationSource;
@@ -25,11 +30,8 @@ import reactor.core.publisher.Mono; // Import Mono
 // Remove: import javax.crypto.spec.SecretKeySpec; // Not used
 import java.nio.charset.StandardCharsets;
 import java.time.Instant; // Import Instant
-import java.util.Arrays;
-import java.util.Base64;
-import java.util.Collections; // Import Collections
-import java.util.List;
-import java.util.Map; // Import Map
+import reactor.core.publisher.Flux;
+import java.util.*;
 
 @Configuration
 @EnableWebFluxSecurity
@@ -131,22 +133,46 @@ public class SecurityConfig {
                 .authorizeExchange(exchanges -> {
                     logger.info("Configuring security authorization rules for gateway-admin");
                     exchanges
-                            // Requests to /api/auth/** are typically for the auth server (demo2),
-                            // but if gateway-admin has its own auth-related debug/status endpoints, permit them.
-                            // Since login is proxied to demo2, this might be okay.
                             .pathMatchers("/api/auth/**").permitAll()
-                            .pathMatchers("/actuator/**").permitAll() // Allow actuator endpoints
+                            .pathMatchers("/actuator/**").permitAll()
                             .anyExchange().authenticated();
                     logger.info("Security rules configured for gateway-admin");
                 })
                 .oauth2ResourceServer(oauth2 -> {
                     logger.info("Configuring OAuth2 resource server for gateway-admin");
                     oauth2.jwt(jwt -> {
-                        jwt.jwtDecoder(jwtDecoder()); // Use the MOCK decoder
+                        jwt.jwtDecoder(jwtDecoder());
+                        // Add this line to use our custom converter
+                        jwt.jwtAuthenticationConverter(jwtAuthenticationConverter());
                         logger.info("JWT authentication configured with MOCK decoder for gateway-admin");
                     });
                 })
                 .build();
+    }
+
+    @Bean
+    public Converter<Jwt, Mono<AbstractAuthenticationToken>> jwtAuthenticationConverter() {
+        JwtGrantedAuthoritiesConverter authoritiesConverter = new JwtGrantedAuthoritiesConverter();
+
+        // Configure the converter to look for the roles claim
+        authoritiesConverter.setAuthoritiesClaimName("roles");
+
+        // No prefix needed since your token already has SCOPE_ prefix
+        authoritiesConverter.setAuthorityPrefix("");
+
+        ReactiveJwtAuthenticationConverter jwtConverter = new ReactiveJwtAuthenticationConverter();
+        jwtConverter.setJwtGrantedAuthoritiesConverter(jwt -> {
+            // Convert Mono<Collection<GrantedAuthority>> to Flux<GrantedAuthority>
+            return Mono.fromCallable(() -> {
+                // Log the JWT claims for debugging
+                logger.debug("JWT claims for authority mapping: {}", jwt.getClaims());
+                Collection<GrantedAuthority> authorities = authoritiesConverter.convert(jwt);
+                logger.debug("Mapped authorities: {}", authorities);
+                return authorities;
+            }).flatMapMany(Flux::fromIterable); // Convert Collection to Flux
+        });
+
+        return jwtConverter;
     }
 
     @Bean
