@@ -152,35 +152,45 @@ public class UserController {
      * Update password
      */
     @PutMapping("/password")
-    public ResponseEntity<?> updatePassword(@Valid @RequestBody PasswordChangeRequest request) {
-        try {
-            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-            if (auth == null) {
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                        .body(Map.of("error", "Authentication required"));
-            }
+    public Mono<ResponseEntity<?>> updatePassword(@Valid @RequestBody PasswordChangeRequest request) {
+        logger.info("Received PUT request to /api/user/password");
+        return ReactiveSecurityContextHolder.getContext()
+                .map(SecurityContext::getAuthentication)
+                .flatMap(authentication -> {
+                    try {
+                        logger.info("Authentication found in updatePassword: {}", authentication);
+                        logger.info("Username from authentication in updatePassword: {}", authentication.getName());
+                        logger.info("Authorities in updatePassword: {}", authentication.getAuthorities());
 
-            String username = auth.getName();
-            logger.info("Updating password for user: {}", username);
+                        String username = authentication.getName();
+                        logger.info("Updating password for user: {}", username);
 
-            userService.updatePassword(username, request.getCurrentPassword(), request.getNewPassword());
+                        userService.updatePassword(username, request.getCurrentPassword(), request.getNewPassword());
 
-            return ResponseEntity.ok(Map.of(
-                    "message", "Password updated successfully"
-            ));
-        } catch (IllegalArgumentException e) {
-            logger.warn("Password update failed: {}", e.getMessage());
-            Map<String, String> errorResponse = new HashMap<>();
-            errorResponse.put("error", "Invalid password");
-            errorResponse.put("message", e.getMessage());
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
-        } catch (Exception e) {
-            logger.error("Error updating password: {}", e.getMessage(), e);
-            Map<String, String> errorResponse = new HashMap<>();
-            errorResponse.put("error", "Failed to update password");
-            errorResponse.put("message", e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
-        }
+                        // Use explicit type cast to ResponseEntity<?>
+                        return Mono.just((ResponseEntity<?>) ResponseEntity.ok(Map.of(
+                                "message", "Password updated successfully"
+                        )));
+                    } catch (IllegalArgumentException e) {
+                        logger.warn("Password update failed: {}", e.getMessage());
+                        Map<String, String> errorResponse = new HashMap<>();
+                        errorResponse.put("error", "Invalid password");
+                        errorResponse.put("message", e.getMessage());
+                        // Use explicit type cast to ResponseEntity<?>
+                        return Mono.just((ResponseEntity<?>) ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse));
+                    } catch (Exception e) {
+                        logger.error("Error updating password: {}", e.getMessage(), e);
+                        Map<String, String> errorResponse = new HashMap<>();
+                        errorResponse.put("error", "Failed to update password");
+                        errorResponse.put("message", e.getMessage());
+                        // Use explicit type cast to ResponseEntity<?>
+                        return Mono.just((ResponseEntity<?>) ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse));
+                    }
+                })
+                .doOnError(e -> logger.error("Error processing authentication context in updatePassword: {}", e.getMessage(), e))
+                // Use explicit type cast here too
+                .defaultIfEmpty((ResponseEntity<?>) ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "Authentication required")));
     }
 
     /**
