@@ -109,6 +109,10 @@ public class UserController {
      */
     @PostMapping(value = "/profile-image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<?> uploadProfilePicture(@RequestParam("profileImage") MultipartFile file) {
+        logger.info("Received file upload request with name: {}, size: {}, content type: {}",
+                file != null ? file.getOriginalFilename() : "null",
+                file != null ? file.getSize() : 0,
+                file != null ? file.getContentType() : "null");
         try {
             Authentication auth = SecurityContextHolder.getContext().getAuthentication();
             if (auth == null) {
@@ -320,122 +324,122 @@ public class UserController {
      * Update user (Admin only)
      */
     @PutMapping("/{id}")
-    public ResponseEntity<?> updateUser(@PathVariable Long id, @Valid @RequestBody UpdateUserRequest request) {
-        try {
-            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-            if (auth == null) {
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                        .body(Map.of("error", "Authentication required"));
-            }
+    public Mono<ResponseEntity<?>> updateUser(@PathVariable Long id, @Valid @RequestBody UpdateUserRequest request) {
+        return ReactiveSecurityContextHolder.getContext()
+                .map(SecurityContext::getAuthentication)
+                .flatMap(auth -> {
+                    try {
+                        // Check if user has admin role or is updating their own profile
+                        if (!hasAdminRole(auth) && !isOwnProfile(auth, id)) {
+                            return Mono.just(ResponseEntity.status(HttpStatus.FORBIDDEN)
+                                    .body(Map.of("error", "Access denied", "message", "You can only update your own profile")));
+                        }
 
-            // Check if user has admin role or is updating their own profile
-            if (!hasAdminRole(auth) && !isOwnProfile(auth, id)) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                        .body(Map.of("error", "Access denied", "message", "You can only update your own profile"));
-            }
+                        // Only admin can change roles
+                        if (request.getRole() != null && !hasAdminRole(auth)) {
+                            return Mono.just(ResponseEntity.status(HttpStatus.FORBIDDEN)
+                                    .body(Map.of("error", "Access denied", "message", "Only admins can change user roles")));
+                        }
 
-            // Only admin can change roles
-            if (request.getRole() != null && !hasAdminRole(auth)) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                        .body(Map.of("error", "Access denied", "message", "Only admins can change user roles"));
-            }
-
-            UserDTO updatedUser = userService.updateUser(id, request);
-            return ResponseEntity.ok(updatedUser);
-        } catch (IllegalArgumentException e) {
-            logger.warn("User update failed for ID {}: {}", id, e.getMessage());
-            Map<String, String> errorResponse = new HashMap<>();
-            errorResponse.put("error", "Invalid user data");
-            errorResponse.put("message", e.getMessage());
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
-        } catch (Exception e) {
-            logger.error("Error updating user {}: {}", id, e.getMessage(), e);
-            Map<String, String> errorResponse = new HashMap<>();
-            errorResponse.put("error", "Failed to update user");
-            errorResponse.put("message", e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
-        }
+                        UserDTO updatedUser = userService.updateUser(id, request);
+                        return Mono.just(ResponseEntity.ok(updatedUser));
+                    } catch (IllegalArgumentException e) {
+                        logger.warn("User update failed for ID {}: {}", id, e.getMessage());
+                        Map<String, String> errorResponse = new HashMap<>();
+                        errorResponse.put("error", "Invalid user data");
+                        errorResponse.put("message", e.getMessage());
+                        return Mono.just(ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse));
+                    } catch (Exception e) {
+                        logger.error("Error updating user {}: {}", id, e.getMessage(), e);
+                        Map<String, String> errorResponse = new HashMap<>();
+                        errorResponse.put("error", "Failed to update user");
+                        errorResponse.put("message", e.getMessage());
+                        return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse));
+                    }
+                })
+                .defaultIfEmpty(ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "Authentication required")));
     }
 
     /**
      * Update user status (Admin only)
      */
     @PatchMapping("/{id}/status")
-    public ResponseEntity<?> updateUserStatus(@PathVariable Long id, @RequestBody Map<String, Boolean> request) {
-        try {
-            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-            if (auth == null) {
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                        .body(Map.of("error", "Authentication required"));
-            }
+    public Mono<ResponseEntity<?>> updateUserStatus(@PathVariable Long id, @RequestBody Map<String, Boolean> request) {
+        return ReactiveSecurityContextHolder.getContext()
+                .map(SecurityContext::getAuthentication)
+                .flatMap(auth -> {
+                    try {
+                        // Check if user has admin role
+                        if (!hasAdminRole(auth)) {
+                            return Mono.just((ResponseEntity<?>) ResponseEntity.status(HttpStatus.FORBIDDEN)
+                                    .body(Map.of("error", "Access denied", "message", "Admin role required")));
+                        }
 
-            // Check if user has admin role
-            if (!hasAdminRole(auth)) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                        .body(Map.of("error", "Access denied", "message", "Admin role required"));
-            }
+                        // Get the active status from the request
+                        Boolean active = request.get("active");
+                        if (active == null) {
+                            return Mono.just((ResponseEntity<?>) ResponseEntity.badRequest()
+                                    .body(Map.of("error", "Missing data", "message", "Active status is required")));
+                        }
 
-            // Get the active status from the request
-            Boolean active = request.get("active");
-            if (active == null) {
-                return ResponseEntity.badRequest()
-                        .body(Map.of("error", "Missing data", "message", "Active status is required"));
-            }
+                        // Prevent admin from deactivating their own account
+                        String adminUsername = auth.getName();
+                        if (userService.isUserWithId(id, adminUsername) && !active) {
+                            return Mono.just((ResponseEntity<?>) ResponseEntity.badRequest()
+                                    .body(Map.of("error", "Invalid operation", "message", "You cannot deactivate your own account")));
+                        }
 
-            // Prevent admin from deactivating their own account
-            String adminUsername = auth.getName();
-            if (userService.isUserWithId(id, adminUsername) && !active) {
-                return ResponseEntity.badRequest()
-                        .body(Map.of("error", "Invalid operation", "message", "You cannot deactivate your own account"));
-            }
-
-            UserDTO updatedUser = userService.updateUserStatus(id, active);
-            return ResponseEntity.ok(updatedUser);
-        } catch (Exception e) {
-            logger.error("Error updating user status for ID {}: {}", id, e.getMessage(), e);
-            Map<String, String> errorResponse = new HashMap<>();
-            errorResponse.put("error", "Failed to update user status");
-            errorResponse.put("message", e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
-        }
+                        UserDTO updatedUser = userService.updateUserStatus(id, active);
+                        return Mono.just((ResponseEntity<?>) ResponseEntity.ok(updatedUser));
+                    } catch (Exception e) {
+                        logger.error("Error updating user status for ID {}: {}", id, e.getMessage(), e);
+                        Map<String, String> errorResponse = new HashMap<>();
+                        errorResponse.put("error", "Failed to update user status");
+                        errorResponse.put("message", e.getMessage());
+                        return Mono.just((ResponseEntity<?>) ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse));
+                    }
+                })
+                .defaultIfEmpty((ResponseEntity<?>) ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "Authentication required")));
     }
 
     /**
      * Delete user (Admin only)
      */
     @DeleteMapping("/{id}")
-    public ResponseEntity<?> deleteUser(@PathVariable Long id) {
-        try {
-            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-            if (auth == null) {
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                        .body(Map.of("error", "Authentication required"));
-            }
+    public Mono<ResponseEntity<?>> deleteUser(@PathVariable Long id) {
+        return ReactiveSecurityContextHolder.getContext()
+                .map(SecurityContext::getAuthentication)
+                .flatMap(auth -> {
+                    try {
+                        // Check if user has admin role
+                        if (!hasAdminRole(auth)) {
+                            return Mono.just((ResponseEntity<?>) ResponseEntity.status(HttpStatus.FORBIDDEN)
+                                    .body(Map.of("error", "Access denied", "message", "Admin role required")));
+                        }
 
-            // Check if user has admin role
-            if (!hasAdminRole(auth)) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                        .body(Map.of("error", "Access denied", "message", "Admin role required"));
-            }
+                        // Prevent admin from deleting their own account
+                        String adminUsername = auth.getName();
+                        if (userService.isUserWithId(id, adminUsername)) {
+                            return Mono.just((ResponseEntity<?>) ResponseEntity.badRequest()
+                                    .body(Map.of("error", "Invalid operation", "message", "You cannot delete your own account")));
+                        }
 
-            // Prevent admin from deleting their own account
-            String adminUsername = auth.getName();
-            if (userService.isUserWithId(id, adminUsername)) {
-                return ResponseEntity.badRequest()
-                        .body(Map.of("error", "Invalid operation", "message", "You cannot delete your own account"));
-            }
-
-            userService.deleteUser(id);
-            return ResponseEntity.ok(Map.of(
-                    "message", "User deleted successfully"
-            ));
-        } catch (Exception e) {
-            logger.error("Error deleting user {}: {}", id, e.getMessage(), e);
-            Map<String, String> errorResponse = new HashMap<>();
-            errorResponse.put("error", "Failed to delete user");
-            errorResponse.put("message", e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
-        }
+                        userService.deleteUser(id);
+                        return Mono.just((ResponseEntity<?>) ResponseEntity.ok(Map.of(
+                                "message", "User deleted successfully"
+                        )));
+                    } catch (Exception e) {
+                        logger.error("Error deleting user {}: {}", id, e.getMessage(), e);
+                        Map<String, String> errorResponse = new HashMap<>();
+                        errorResponse.put("error", "Failed to delete user");
+                        errorResponse.put("message", e.getMessage());
+                        return Mono.just((ResponseEntity<?>) ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse));
+                    }
+                })
+                .defaultIfEmpty((ResponseEntity<?>) ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "Authentication required")));
     }
 
     // Helper methods for role and identity checks

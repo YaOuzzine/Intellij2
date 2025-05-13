@@ -503,14 +503,18 @@ const SystemSettingsPage = () => {
 
     setLoading(true);
 
-    // Create FormData for file upload
-    const formData = new FormData();
-    formData.append('profileImage', selectedFile);
-
     try {
+      // Create FormData for file upload
+      const formData = new FormData();
+      formData.append('profileImage', selectedFile);
+
+      // Add detailed logging to help diagnose the issue
+      console.log('File being uploaded:', selectedFile.name, selectedFile.type, selectedFile.size);
+
+      // boundary for multipart/form-data
       const response = await apiClient.post('/user/profile-image', formData, {
         headers: {
-          'Content-Type': 'multipart/form-data'
+          'Content-Type': undefined // Let browser set correct content type with boundary
         }
       });
 
@@ -521,7 +525,7 @@ const SystemSettingsPage = () => {
       setSelectedFile(null);
       setPreviewUrl(null);
 
-      showNotification('Profile picture updated successfully');
+      showNotification('Profile picture uploaded successfully');
     } catch (error) {
       console.error('Error uploading profile picture:', error);
       showNotification(
