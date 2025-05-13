@@ -4,6 +4,7 @@ import com.example.demo.Db.IpUtils;
 import com.example.demo.Entity.GatewayRoute;
 import com.example.demo.Entity.RateLimit;
 import com.example.demo.Repository.GatewayRouteRepository;
+import com.example.demo.Service.RateLimitMetricsService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cloud.gateway.filter.GatewayFilter;
@@ -23,14 +24,17 @@ import java.util.concurrent.ConcurrentHashMap;
 public class SimpleRateLimitGatewayFilterFactory extends AbstractGatewayFilterFactory<Void> {
 
     private final GatewayRouteRepository gatewayRouteRepository;
+    private final RateLimitMetricsService rateLimitMetricsService;
 
     // In-memory tracker for client requests
     private final Map<String, RequestTracker> requestMap = new ConcurrentHashMap<>();
 
     @Autowired
-    public SimpleRateLimitGatewayFilterFactory(GatewayRouteRepository gatewayRouteRepository) {
+    public SimpleRateLimitGatewayFilterFactory(GatewayRouteRepository gatewayRouteRepository,
+                                               RateLimitMetricsService rateLimitMetricsService) {
         super(Void.class);
         this.gatewayRouteRepository = gatewayRouteRepository;
+        this.rateLimitMetricsService = rateLimitMetricsService;
     }
 
     @Override
@@ -73,7 +77,19 @@ public class SimpleRateLimitGatewayFilterFactory extends AbstractGatewayFilterFa
                 return exchange.getResponse().setComplete();
             }
 
-            log.info("Matching route found: {}", matchingRoute.getRouteId());
+            String routeId = matchingRoute.getRouteId() != null ?
+                    matchingRoute.getRouteId() : "route-" + matchingRoute.getId();
+
+            log.info("Matching route found: {}", routeId);
+
+            // Record the request in metrics service
+            rateLimitMetricsService.recordRequest(routeId);
+
+            // Skip rate limiting if not enabled for this route
+            if (matchingRoute.getWithRateLimit() == null || !matchingRoute.getWithRateLimit()) {
+                log.info("Rate limiting disabled for route {}. Proceeding.", routeId);
+                return chain.filter(exchange);
+            }
 
             // 6) Retrieve the RateLimit object from the route
             RateLimit rl = matchingRoute.getRateLimit();
@@ -84,14 +100,14 @@ public class SimpleRateLimitGatewayFilterFactory extends AbstractGatewayFilterFa
                 timeWindowMs = rl.getTimeWindowMs();
             } else {
                 log.warn("No RateLimit entity or missing fields for route {} => using defaults.",
-                        matchingRoute.getRouteId());
+                        routeId);
                 maxRequests = 10;
                 timeWindowMs = 60000;
             }
 
             // 7) Build a unique key from the client IP + routeId
             String clientIp = IpUtils.getClientIp(exchange.getRequest());
-            String key = clientIp + "_" + matchingRoute.getRouteId();
+            String key = clientIp + "_" + routeId;
 
             // 8) Retrieve or create a RequestTracker for this key
             RequestTracker tracker = requestMap.computeIfAbsent(key, k -> new RequestTracker());
@@ -107,10 +123,14 @@ public class SimpleRateLimitGatewayFilterFactory extends AbstractGatewayFilterFa
                 if (tracker.getRequestCount() < maxRequests) {
                     tracker.incrementRequestCount();
                     log.info("Request allowed. clientIp={}, routeId={}, count={}",
-                            clientIp, matchingRoute.getRouteId(), tracker.getRequestCount());
+                            clientIp, routeId, tracker.getRequestCount());
                 } else {
                     log.warn("Rate limit exceeded for clientIp={} on routeId={}",
-                            clientIp, matchingRoute.getRouteId());
+                            clientIp, routeId);
+
+                    // Record the rejection in metrics service
+                    rateLimitMetricsService.recordRejection(routeId);
+
                     exchange.getResponse().setStatusCode(HttpStatus.TOO_MANY_REQUESTS);
                     return exchange.getResponse().setComplete();
                 }

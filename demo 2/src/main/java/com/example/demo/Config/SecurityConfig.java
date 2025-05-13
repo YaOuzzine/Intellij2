@@ -17,8 +17,6 @@ import org.springframework.security.web.server.context.NoOpServerSecurityContext
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.reactive.CorsConfigurationSource;
 import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource;
-import org.springframework.security.config.Customizer;
-
 
 import java.util.List;
 
@@ -51,7 +49,10 @@ public class SecurityConfig {
                 .authorizeExchange(ex -> ex
                         .pathMatchers(HttpMethod.OPTIONS, "/**").permitAll() // Allow CORS preflight requests
                         .pathMatchers("/api/auth/login").permitAll() // Login endpoint
-                        .pathMatchers("/api/metrics/**").permitAll() // Metrics endpoints
+
+                        // Allow all metrics endpoints without authentication
+                        .pathMatchers("/api/metrics/**").permitAll()  // <-- IMPORTANT CHANGE
+
                         // Add other public paths if any
                         .anyExchange().authenticated() // All other requests must be authenticated
                 )
