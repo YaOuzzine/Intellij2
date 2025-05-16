@@ -135,6 +135,7 @@ public class SecurityConfig {
                     exchanges
                             .pathMatchers("/api/auth/**").permitAll()
                             .pathMatchers("/actuator/**").permitAll()
+                            .pathMatchers("/api/sync/**").permitAll() // Add this line to permit access without auth
                             .anyExchange().authenticated();
                     logger.info("Security rules configured for gateway-admin");
                 })

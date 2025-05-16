@@ -7,6 +7,7 @@ export { apiClient };
 export const api = {
   // Auth
   login: (credentials) => apiClient.post('/auth/login', credentials),
+  syncRoutes: () => apiClient.post('/sync/routes'),
   
   // Gateway Routes
   getRoutes: () => apiClient.get('/gateway-routes'),

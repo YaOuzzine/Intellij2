@@ -7,7 +7,7 @@ spring:
   cloud:
     vault:
       enabled: true
-      token: hvs.vCSk63xa9ZiXjRcYjyZu37Ba
+      token: hvs.L6hLlJWNHvLTqG9PPGCO7VxO
       host: localhost
       port: 8200
       scheme: http

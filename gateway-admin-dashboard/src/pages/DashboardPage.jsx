@@ -29,6 +29,7 @@ import NetworkCheckIcon from '@mui/icons-material/NetworkCheck';
 import { styled } from '@mui/material/styles';
 
 import RouteTable from '../components/RouteTable';
+import SyncButton from '../components/SyncButton';
 import {
   fetchGatewayRoutes,
   addGatewayRoute,
@@ -459,9 +460,12 @@ const DashboardPage = () => {
   return (
       <Box sx={{ p: 3 }}>
         {/* Header */}
-        <Typography variant="h5" component="h1" sx={{ mb: 4 }}>
-          Gateway Management Dashboard
-        </Typography>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
+          <Typography variant="h5" component="h1">
+            Gateway Management Dashboard
+          </Typography>
+          <SyncButton />
+        </Box>
 
         {/* Metrics Cards */}
         <Grid container spacing={3} sx={{ mb: 4 }}>
