@@ -1,4 +1,3 @@
-// src/components/RouteTable.jsx
 import React, { useState } from 'react';
 import {
   Box,
@@ -23,8 +22,10 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  Collapse
+  Collapse,
+  alpha
 } from '@mui/material';
+import { styled, keyframes } from '@mui/material/styles';
 import NetworkCheckIcon from '@mui/icons-material/NetworkCheck';
 import SearchIcon from '@mui/icons-material/Search';
 import EditIcon from '@mui/icons-material/Edit';
@@ -35,6 +36,123 @@ import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 import SecurityIcon from '@mui/icons-material/Security';
 import SpeedIcon from '@mui/icons-material/Speed';
 import { useNavigate } from 'react-router-dom';
+
+// Define animations
+const fadeIn = keyframes`
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+`;
+
+const pulse = keyframes`
+  0% { transform: scale(1); }
+  50% { transform: scale(1.02); }
+  100% { transform: scale(1); }
+`;
+
+const slideDown = keyframes`
+  from { opacity: 0; max-height: 0; }
+  to { opacity: 1; max-height: 800px; }
+`;
+
+// Styled components
+const StyledTableContainer = styled(TableContainer)(({ theme }) => ({
+  borderRadius: '12px',
+  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)',
+  overflow: 'hidden',
+  animation: `${fadeIn} 0.5s ease-out`,
+  transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+  '&:hover': {
+    boxShadow: '0 12px 28px rgba(0, 0, 0, 0.15)',
+  },
+}));
+
+const StyledTableHead = styled(TableHead)(({ theme }) => ({
+  background: `linear-gradient(145deg, ${theme.palette.background.default}, ${alpha(theme.palette.primary.main, 0.1)})`,
+  '& .MuiTableCell-head': {
+    color: theme.palette.text.primary,
+    fontWeight: 600,
+    borderBottom: `2px solid ${theme.palette.primary.main}`,
+    padding: theme.spacing(1.5, 2),
+  },
+}));
+
+const StyledTableRow = styled(TableRow)(({ theme, highlighted }) => ({
+  transition: 'all 0.2s ease',
+  position: 'relative',
+  '&:hover': {
+    backgroundColor: alpha(theme.palette.primary.main, 0.05),
+    transform: 'translateY(-1px)',
+    boxShadow: '0 3px 5px rgba(0, 0, 0, 0.05)',
+  },
+  ...(highlighted && {
+    backgroundColor: alpha(theme.palette.primary.main, 0.08),
+    animation: `${pulse} 2s 3`,
+  }),
+}));
+
+const ActionButton = styled(Button)(({ theme, color = 'primary' }) => ({
+  borderRadius: '8px',
+  textTransform: 'none',
+  boxShadow: 'none',
+  transition: 'all 0.2s ease',
+  '&:hover': {
+    boxShadow: `0 4px 8px ${alpha(theme.palette[color].main, 0.25)}`,
+    transform: 'translateY(-2px)',
+  },
+}));
+
+const SearchTextField = styled(TextField)(({ theme }) => ({
+  '& .MuiOutlinedInput-root': {
+    borderRadius: '12px',
+    transition: 'all 0.2s ease',
+    backgroundColor: alpha(theme.palette.background.paper, 0.8),
+    '&:hover': {
+      backgroundColor: theme.palette.background.paper,
+      boxShadow: '0 4px 8px rgba(0, 0, 0, 0.05)',
+    },
+    '&.Mui-focused': {
+      boxShadow: `0 4px 16px ${alpha(theme.palette.primary.main, 0.15)}`,
+    },
+  },
+}));
+
+const ExpandButton = styled(IconButton)(({ theme, active }) => ({
+  transition: 'transform 0.3s ease, background 0.2s ease',
+  backgroundColor: active ? alpha(theme.palette.primary.main, 0.1) : 'transparent',
+  '&:hover': {
+    backgroundColor: alpha(theme.palette.primary.main, 0.2),
+  },
+}));
+
+const SecurityIconButton = styled(IconButton)(({ theme, active }) => ({
+  color: active ? theme.palette.primary.main : theme.palette.text.disabled,
+  backgroundColor: active ? alpha(theme.palette.primary.main, 0.1) : 'transparent',
+  transition: 'all 0.2s ease',
+  '&:hover': {
+    backgroundColor: alpha(theme.palette.primary.main, 0.2),
+    transform: 'translateY(-2px)',
+  },
+}));
+
+const ExpandedContent = styled(Box)(({ theme }) => ({
+  animation: `${slideDown} 0.4s ease-out`,
+  padding: theme.spacing(2, 3, 3),
+  backgroundColor: alpha(theme.palette.background.paper, 0.5),
+  borderBottomLeftRadius: '8px',
+  borderBottomRightRadius: '8px',
+  borderTop: `1px solid ${alpha(theme.palette.divider, 0.5)}`,
+}));
+
+const StatusChip = styled(Chip)(({ theme, status }) => ({
+  fontWeight: 600,
+  borderRadius: '16px',
+  backgroundColor: status === 'active' ? alpha(theme.palette.success.light, 0.2) : alpha(theme.palette.grey[400], 0.2),
+  color: status === 'active' ? theme.palette.success.dark : theme.palette.grey[700],
+  border: status === 'active' ? `1px solid ${alpha(theme.palette.success.main, 0.3)}` : `1px solid ${alpha(theme.palette.grey[500], 0.3)}`,
+  '.MuiChip-label': {
+    padding: '0 12px',
+  },
+}));
 
 export default function RouteTable({
                                      routes,
@@ -101,12 +219,32 @@ export default function RouteTable({
   return (
       <Box>
         {/* Header and Search */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Typography variant="h6" fontWeight="bold">
+        <Box sx={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          mb: 3,
+          marginTop: '100px',
+          animation: `${fadeIn} 0.4s ease-out`
+        }}>
+          <Typography variant="h6" fontWeight="bold" sx={{
+            color: 'primary.main',
+            position: 'relative',
+            '&:after': {
+              content: '""',
+              position: 'absolute',
+              bottom: -4,
+              left: 0,
+              width: 40,
+              height: 3,
+              backgroundColor: 'primary.main',
+              borderRadius: 4
+            }
+          }}>
             Gateway Routes
           </Typography>
-          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-            <TextField
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <SearchTextField
                 size="small"
                 variant="outlined"
                 placeholder="Search routes..."
@@ -115,23 +253,27 @@ export default function RouteTable({
                 InputProps={{
                   startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} />
                 }}
-                sx={{ mr: 2, width: 250 }}
             />
-            <Button
+            <ActionButton
                 variant="contained"
                 color="primary"
                 startIcon={<AddIcon />}
                 onClick={onAdd}
+                sx={{
+                  py: 1,
+                  px: 2,
+                  fontWeight: 600
+                }}
             >
               Add Route
-            </Button>
+            </ActionButton>
           </Box>
         </Box>
 
         {/* Routes Table */}
-        <TableContainer component={Paper} elevation={1}>
+        <StyledTableContainer component={Paper} elevation={0}>
           <Table>
-            <TableHead sx={{ bgcolor: 'background.default' }}>
+            <StyledTableHead>
               <TableRow>
                 <TableCell width="40px" /> {/* For expand/collapse */}
                 <TableCell>Route ID</TableCell>
@@ -140,167 +282,237 @@ export default function RouteTable({
                 <TableCell align="center">Security</TableCell>
                 <TableCell align="right">Actions</TableCell>
               </TableRow>
-            </TableHead>
+            </StyledTableHead>
             <TableBody>
               {currentItems.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} align="center" sx={{ py: 3 }}>
-                      <Typography variant="subtitle1" color="text.secondary">
-                        No routes found
-                      </Typography>
+                    <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
+                      <Box sx={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        py: 6,
+                        opacity: 0.7
+                      }}>
+                        <SearchIcon sx={{ fontSize: 48, mb: 2, color: 'text.secondary' }} />
+                        <Typography variant="subtitle1" color="text.secondary" fontWeight={500}>
+                          No routes found
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Try adjusting your search criteria
+                        </Typography>
+                      </Box>
                     </TableCell>
                   </TableRow>
               ) : (
                   currentItems.map((route) => (
                       <React.Fragment key={route.id}>
-                        <TableRow
-                            hover
+                        <StyledTableRow
+                            highlighted={route.highlighted}
                             sx={{
-                              '&:hover': { bgcolor: 'rgba(0, 0, 0, 0.04)' },
                               cursor: 'pointer'
                             }}
                         >
                           <TableCell>
-                            <IconButton
+                            <ExpandButton
                                 size="small"
                                 onClick={() => toggleRowExpansion(route.id)}
+                                active={expandedRows[route.id]}
                             >
                               {expandedRows[route.id] ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
-                            </IconButton>
+                            </ExpandButton>
                           </TableCell>
-                          <TableCell>{route.routeId || `route-${route.id}`}</TableCell>
-                          <TableCell>{route.predicates}</TableCell>
-                          <TableCell>{route.uri}</TableCell>
+                          <TableCell>
+                            <Typography variant="body2" fontWeight={500}>
+                              {route.routeId || `route-${route.id}`}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Tooltip title={route.predicates} arrow placement="top">
+                              <Typography
+                                  variant="body2"
+                                  sx={{
+                                    maxWidth: 180,
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap'
+                                  }}
+                              >
+                                {route.predicates}
+                              </Typography>
+                            </Tooltip>
+                          </TableCell>
+                          <TableCell>
+                            <Tooltip title={route.uri} arrow placement="top">
+                              <Typography
+                                  variant="body2"
+                                  sx={{
+                                    maxWidth: 180,
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap'
+                                  }}
+                              >
+                                {route.uri}
+                              </Typography>
+                            </Tooltip>
+                          </TableCell>
                           <TableCell align="center">
                             <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
-                              <Tooltip title={`IP Filtering: ${route.withIpFilter ? 'Enabled' : 'Disabled'}`}>
+                              <Tooltip title={`IP Filtering: ${route.withIpFilter ? 'Enabled' : 'Disabled'}`} arrow>
                                 <Badge
                                     badgeContent={route.allowedIps?.length || 0}
                                     color={route.withIpFilter ? "success" : "default"}
                                     overlap="circular"
                                     max={99}
+                                    sx={{
+                                      '& .MuiBadge-badge': {
+                                        fontWeight: 'bold',
+                                        fontSize: '0.7rem'
+                                      }
+                                    }}
                                 >
-                                  <IconButton
+                                  <SecurityIconButton
                                       size="small"
-                                      color={route.withIpFilter ? "primary" : "default"}
+                                      active={route.withIpFilter}
                                       onClick={() => handleDirectIpSetup(route)}
                                   >
                                     <NetworkCheckIcon />
-                                  </IconButton>
+                                  </SecurityIconButton>
                                 </Badge>
                               </Tooltip>
 
-                              <Tooltip title={`Token Validation: ${route.withToken ? 'Enabled' : 'Disabled'}`}>
-                                <IconButton
+                              <Tooltip title={`Token Validation: ${route.withToken ? 'Enabled' : 'Disabled'}`} arrow>
+                                <SecurityIconButton
                                     size="small"
-                                    color={route.withToken ? "primary" : "default"}
+                                    active={route.withToken}
                                     onClick={() => onToggleTokenValidation(route)}
                                 >
                                   <SecurityIcon />
-                                </IconButton>
+                                </SecurityIconButton>
                               </Tooltip>
 
-                              <Tooltip title={`Rate Limiting: ${route.withRateLimit ? 'Enabled' : 'Disabled'}`}>
-                                <IconButton
+                              <Tooltip title={`Rate Limiting: ${route.withRateLimit ? 'Enabled' : 'Disabled'}`} arrow>
+                                <SecurityIconButton
                                     size="small"
-                                    color={route.withRateLimit ? "primary" : "default"}
+                                    active={route.withRateLimit}
                                     onClick={() => onToggleRateLimit(route)}
                                 >
                                   <SpeedIcon />
-                                </IconButton>
+                                </SecurityIconButton>
                               </Tooltip>
                             </Box>
                           </TableCell>
                           <TableCell align="right">
-                            <Button
+                            <ActionButton
                                 variant="outlined"
                                 color="primary"
                                 size="small"
                                 startIcon={<EditIcon />}
-                                sx={{ mr: 1, textTransform: 'none' }}
+                                sx={{ mr: 1 }}
                                 onClick={() => onUpdate(route)}
                             >
                               Edit
-                            </Button>
-                            <Button
+                            </ActionButton>
+                            <ActionButton
                                 variant="outlined"
                                 color="error"
                                 size="small"
                                 startIcon={<DeleteIcon />}
-                                sx={{ textTransform: 'none' }}
                                 onClick={() => onDelete(route.id)}
                             >
                               Delete
-                            </Button>
+                            </ActionButton>
                           </TableCell>
-                        </TableRow>
+                        </StyledTableRow>
                         <TableRow>
                           <TableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={6}>
                             <Collapse in={expandedRows[route.id]} timeout="auto" unmountOnExit>
-                              <Box sx={{ m: 2 }}>
-                                <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                  <Typography variant="subtitle1" gutterBottom component="div">
+                              <ExpandedContent>
+                                <Box sx={{
+                                  mb: 2,
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center'
+                                }}>
+                                  <Typography variant="subtitle1" fontWeight="bold" color="primary.main">
                                     Security Settings
                                   </Typography>
-                                  <Button
+                                  <ActionButton
                                       variant="contained"
                                       size="small"
                                       color="primary"
                                       startIcon={<NetworkCheckIcon />}
-                                      sx={{ textTransform: 'none' }}
                                       onClick={() => handleOpenIpManager(route)}
                                   >
                                     Manage IP Whitelist
-                                  </Button>
+                                  </ActionButton>
                                 </Box>
 
-                                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
-                                  <FormControlLabel
-                                      control={
-                                        <Switch
-                                            checked={route.withIpFilter || false}
-                                            onChange={() => onToggleIpFilter(route)}
-                                            color="primary"
-                                        />
-                                      }
-                                      label="IP Filtering"
-                                  />
+                                <Paper sx={{ p: 2, mb: 2, borderRadius: '8px', bgcolor: alpha('#f5f5f5', 0.5) }}>
+                                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+                                    <FormControlLabel
+                                        control={
+                                          <Switch
+                                              checked={route.withIpFilter || false}
+                                              onChange={() => onToggleIpFilter(route)}
+                                              color="primary"
+                                          />
+                                        }
+                                        label={
+                                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                                            <NetworkCheckIcon fontSize="small" sx={{ mr: 0.5 }} />
+                                            <Typography fontWeight={500}>IP Filtering</Typography>
+                                          </Box>
+                                        }
+                                    />
 
-                                  <FormControlLabel
-                                      control={
-                                        <Switch
-                                            checked={route.withToken || false}
-                                            onChange={() => onToggleTokenValidation(route)}
-                                            color="primary"
-                                        />
-                                      }
-                                      label="Token Validation"
-                                  />
+                                    <FormControlLabel
+                                        control={
+                                          <Switch
+                                              checked={route.withToken || false}
+                                              onChange={() => onToggleTokenValidation(route)}
+                                              color="primary"
+                                          />
+                                        }
+                                        label={
+                                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                                            <SecurityIcon fontSize="small" sx={{ mr: 0.5 }} />
+                                            <Typography fontWeight={500}>Token Validation</Typography>
+                                          </Box>
+                                        }
+                                    />
 
-                                  <FormControlLabel
-                                      control={
-                                        <Switch
-                                            checked={route.withRateLimit || false}
-                                            onChange={() => onToggleRateLimit(route)}
-                                            color="primary"
-                                        />
-                                      }
-                                      label="Rate Limiting"
-                                  />
-                                </Box>
+                                    <FormControlLabel
+                                        control={
+                                          <Switch
+                                              checked={route.withRateLimit || false}
+                                              onChange={() => onToggleRateLimit(route)}
+                                              color="primary"
+                                          />
+                                        }
+                                        label={
+                                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                                            <SpeedIcon fontSize="small" sx={{ mr: 0.5 }} />
+                                            <Typography fontWeight={500}>Rate Limiting</Typography>
+                                          </Box>
+                                        }
+                                    />
+                                  </Box>
+                                </Paper>
 
                                 {route.withIpFilter && (
                                     <Box sx={{ mt: 2 }}>
-                                      <Typography variant="subtitle2" gutterBottom>
+                                      <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
                                         Allowed IP Addresses:
                                       </Typography>
                                       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
                                         {route.allowedIps && route.allowedIps.length > 0 ? (
                                             route.allowedIps.map(ip => (
-                                                <Chip
+                                                <StatusChip
                                                     key={ip.id}
                                                     label={ip.ip}
-                                                    variant="outlined"
+                                                    status="active"
                                                     size="small"
                                                 />
                                             ))
@@ -315,16 +527,21 @@ export default function RouteTable({
 
                                 {route.withRateLimit && route.rateLimit && (
                                     <Box sx={{ mt: 2 }}>
-                                      <Typography variant="subtitle2" gutterBottom>
+                                      <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
                                         Rate Limit Settings:
                                       </Typography>
-                                      <Typography variant="body2">
-                                        Max Requests: {route.rateLimit.maxRequests || 'Not set'} requests per{' '}
-                                        {route.rateLimit.timeWindowMs ? (route.rateLimit.timeWindowMs / 1000) : 'N/A'} seconds
-                                      </Typography>
+                                      <Paper sx={{ p: 2, borderRadius: '8px', bgcolor: alpha('#fff9c4', 0.3), border: '1px dashed #ffc107' }}>
+                                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                                          <SpeedIcon sx={{ mr: 1, color: 'warning.main' }} />
+                                          <Typography variant="body2" fontWeight={500}>
+                                            {route.rateLimit.maxRequests || 'Not set'} requests per{' '}
+                                            {route.rateLimit.timeWindowMs ? (route.rateLimit.timeWindowMs / 1000) : 'N/A'} seconds
+                                          </Typography>
+                                        </Box>
+                                      </Paper>
                                     </Box>
                                 )}
-                              </Box>
+                              </ExpandedContent>
                             </Collapse>
                           </TableCell>
                         </TableRow>
@@ -333,17 +550,31 @@ export default function RouteTable({
               )}
             </TableBody>
           </Table>
-        </TableContainer>
+        </StyledTableContainer>
 
         {/* Pagination */}
         {totalPages > 1 && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
+            <Box sx={{
+              display: 'flex',
+              justifyContent: 'center',
+              mt: 3,
+              animation: `${fadeIn} 0.6s ease-out`
+            }}>
               <Pagination
                   count={totalPages}
                   page={currentPage}
                   onChange={(e, page) => setCurrentPage(page)}
                   color="primary"
                   shape="rounded"
+                  sx={{
+                    '& .MuiPaginationItem-root': {
+                      borderRadius: '8px',
+                      '&.Mui-selected': {
+                        fontWeight: 'bold',
+                        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)'
+                      }
+                    }
+                  }}
               />
             </Box>
         )}
@@ -354,12 +585,24 @@ export default function RouteTable({
             onClose={() => setOpenIpDialog(false)}
             maxWidth="sm"
             fullWidth
+            PaperProps={{
+              sx: {
+                borderRadius: '12px',
+                boxShadow: '0 12px 32px rgba(0, 0, 0, 0.2)',
+                background: 'linear-gradient(145deg, #ffffff, #f8f9fa)'
+              }
+            }}
         >
-          <DialogTitle>
+          <DialogTitle sx={{
+            borderBottom: '1px solid',
+            borderColor: 'divider',
+            pb: 2,
+            fontWeight: 'bold'
+          }}>
             IP Filtering for {selectedRoute?.predicates}
           </DialogTitle>
-          <DialogContent>
-            <Typography variant="body1" paragraph>
+          <DialogContent sx={{ py: 3 }}>
+            <Typography variant="body1" paragraph fontWeight={500}>
               IP filtering {selectedRoute?.withIpFilter ? 'is enabled' : 'is disabled'} for this route.
             </Typography>
 
@@ -370,31 +613,53 @@ export default function RouteTable({
                   </Typography>
                   <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
                     {selectedRoute?.allowedIps?.map(ip => (
-                        <Chip
+                        <StatusChip
                             key={ip.id}
                             label={ip.ip}
-                            variant="outlined"
+                            status="active"
+                            size="small"
                         />
                     ))}
                   </Box>
                 </>
             )}
 
-            <Typography>
-              For detailed IP management, you can go to the dedicated IP Management page.
-            </Typography>
+            <Box sx={{
+              mt: 2,
+              p: 2,
+              bgcolor: alpha('#e3f2fd', 0.5),
+              borderRadius: '8px',
+              border: '1px dashed',
+              borderColor: 'primary.light'
+            }}>
+              <Typography variant="body2" color="primary.main">
+                For detailed IP management, you can go to the dedicated IP Management page.
+              </Typography>
+            </Box>
           </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setOpenIpDialog(false)}>
+          <DialogActions sx={{ px: 3, pb: 3 }}>
+            <Button
+                onClick={() => setOpenIpDialog(false)}
+                variant="outlined"
+                sx={{
+                  borderRadius: '8px',
+                  textTransform: 'none'
+                }}
+            >
               Close
             </Button>
-            <Button
+            <ActionButton
                 variant="contained"
                 color="primary"
                 onClick={() => handleManageIps(selectedRoute?.id)}
+                sx={{
+                  borderRadius: '8px',
+                  textTransform: 'none',
+                  fontWeight: 600
+                }}
             >
               Manage IP Addresses
-            </Button>
+            </ActionButton>
           </DialogActions>
         </Dialog>
       </Box>
