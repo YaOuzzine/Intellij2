@@ -19,7 +19,8 @@ import {
   Select,
   MenuItem,
   InputLabel,
-  FormControl
+  FormControl,
+  keyframes
 } from '@mui/material';
 import PeopleOutlineIcon from '@mui/icons-material/PeopleOutline';
 import ComputerIcon from '@mui/icons-material/Computer';
@@ -41,12 +42,44 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 
+const pulse = keyframes`
+  0% { transform: scale(1); }
+  50% { transform: scale(1.02); }
+  100% { transform: scale(1); }
+`;
+
+const fadeIn = keyframes`
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+`;
+
 const MetricCard = styled(Paper)(({ theme }) => ({
-  padding: theme.spacing(2),
+  padding: theme.spacing(3),
   display: 'flex',
   alignItems: 'center',
   height: '100%',
-  boxShadow: '0px 3px 6px rgba(0, 0, 0, 0.1)'
+  borderRadius: '12px',
+  transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+  boxShadow: '0 8px 16px rgba(0, 0, 0, 0.1)',
+  position: 'relative',
+  overflow: 'hidden',
+  '&:hover': {
+    transform: 'translateY(-5px)',
+    boxShadow: '0 12px 24px rgba(0, 0, 0, 0.15)',
+  },
+  '&::before': {
+    content: '""',
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: '4px',
+    backgroundColor: theme.palette.primary.main,
+  },
+}));
+
+const AnimatedGridItem = styled(Grid)(({ theme }) => ({
+  animation: `${fadeIn} 0.6s ease-out`,
 }));
 
 // Create a context for managing the highlight state of IP Management nav item
@@ -123,7 +156,6 @@ const DashboardPage = () => {
       if (highlightedRouteId) {
         const highlightedRoute = data.find(r => r.id === parseInt(highlightedRouteId));
         if (highlightedRoute) {
-          // You could add a property to highlight it in the UI
           highlightedRoute.highlighted = true;
         }
       }
@@ -253,7 +285,6 @@ const DashboardPage = () => {
   };
 
   const handleOpenEditDialog = (route) => {
-    // Create a copy of the route object to avoid direct state mutation
     const routeData = {
       ...route,
       rateLimit: route.rateLimit ? { ...route.rateLimit } : { maxRequests: 10, timeWindowMs: 60000 }
@@ -312,13 +343,11 @@ const DashboardPage = () => {
       }
 
       if (!data.predicates.endsWith('/**')) {
-        // Add slash-star-star if not present
         data.predicates = data.predicates.endsWith('/')
             ? `${data.predicates}**`
             : `${data.predicates}/**`;
       }
 
-      // Ensure URI has protocol
       if (!data.uri.startsWith('http://') && !data.uri.startsWith('https://')) {
         data.uri = `http://${data.uri}`;
       }
@@ -388,7 +417,6 @@ const DashboardPage = () => {
       await updateGatewayRoute(route.id, updatedRoute);
 
       if (updatedRoute.withIpFilter) {
-        // If enabling IP filtering, show notification with action and highlight nav
         showNotification(
             'IP filtering enabled. Add IP addresses to the whitelist for this route to take effect.',
             'info',
@@ -396,15 +424,14 @@ const DashboardPage = () => {
                 color="inherit"
                 size="small"
                 onClick={() => goToIpManagement(route.id)}
+                sx={{ color: 'primary.main' }}
             >
               Manage IPs
             </Button>
         );
 
-        // Highlight the IP Management nav item if context is available
         if (updateNavHighlight) {
           updateNavHighlight('IP_MANAGEMENT');
-          // Reset highlight after 10 seconds
           setTimeout(() => updateNavHighlight(null), 10000);
         }
       } else {
@@ -458,10 +485,10 @@ const DashboardPage = () => {
   };
 
   return (
-      <Box sx={{ p: 3 }}>
+      <Box sx={{ p: 3, animation: `${fadeIn} 0.6s ease-out` }}>
         {/* Header */}
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
-          <Typography variant="h5" component="h1">
+          <Typography variant="h4" component="h1" sx={{ fontWeight: 700, color: 'primary.main' }}>
             Gateway Management Dashboard
           </Typography>
           <SyncButton />
@@ -470,24 +497,26 @@ const DashboardPage = () => {
         {/* Metrics Cards */}
         <Grid container spacing={3} sx={{ mb: 4 }}>
           {/* Total Routes */}
-          <Grid item xs={12} sm={6} md={3}>
+          <AnimatedGridItem item xs={12} sm={6} md={3}>
             <MetricCard>
               <Box sx={{ display: 'flex', alignItems: 'center' }}>
                 <Box
                     sx={{
-                      backgroundColor: '#e8f5e9',
+                      backgroundColor: 'rgba(255, 152, 0, 0.1)',
                       borderRadius: '50%',
-                      p: 1.5,
-                      mr: 2
+                      p: 2,
+                      mr: 2,
+                      color: 'primary.main',
+                      animation: `${pulse} 2s infinite`
                     }}
                 >
-                  <NetworkCheckIcon />
+                  <NetworkCheckIcon fontSize="medium" />
                 </Box>
                 <Box>
                   <Typography color="textSecondary" variant="subtitle2">
                     Total Routes
                   </Typography>
-                  <Typography variant="h4">
+                  <Typography variant="h4" sx={{ color: 'primary.dark' }}>
                     {metrics.totalRoutes}
                   </Typography>
                   <Typography variant="caption" color="textSecondary">
@@ -496,28 +525,29 @@ const DashboardPage = () => {
                 </Box>
               </Box>
             </MetricCard>
-          </Grid>
+          </AnimatedGridItem>
 
           {/* Accepted Requests This Minute */}
-          <Grid item xs={12} sm={6} md={3}>
+          <AnimatedGridItem item xs={12} sm={6} md={3}>
             <MetricCard>
               <Box sx={{ display: 'flex', alignItems: 'center' }}>
                 <Box
                     sx={{
-                      backgroundColor: '#e8f5e9',
+                      backgroundColor: 'rgba(76, 175, 80, 0.1)',
                       borderRadius: '50%',
-                      p: 1.5,
-                      mr: 2
+                      p: 2,
+                      mr: 2,
+                      color: 'success.main'
                     }}
                 >
-                  <ArrowUpwardIcon fontSize="small" />
+                  <ArrowUpwardIcon fontSize="medium" />
                 </Box>
                 <Box>
                   <Typography color="textSecondary" variant="subtitle2">
                     Requests This Minute
                   </Typography>
                   <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    <Typography variant="h4" sx={{ mr: 1 }}>
+                    <Typography variant="h4" sx={{ mr: 1, color: 'success.dark' }}>
                       {minuteMetrics.requestsCurrentMinute}
                     </Typography>
                     <Box
@@ -526,10 +556,10 @@ const DashboardPage = () => {
                           alignItems: 'center',
                           backgroundColor:
                               minuteMetrics.increasePercentage >= 0
-                                  ? '#e6f4ea'
-                                  : '#fce8e6',
-                          borderRadius: '4px',
-                          px: 1,
+                                  ? 'rgba(76, 175, 80, 0.1)'
+                                  : 'rgba(244, 67, 54, 0.1)',
+                          borderRadius: '16px',
+                          px: 1.5,
                           py: 0.5
                         }}
                     >
@@ -538,8 +568,8 @@ const DashboardPage = () => {
                           sx={{
                             color:
                                 minuteMetrics.increasePercentage >= 0
-                                    ? '#34a853'
-                                    : '#ea4335',
+                                    ? 'success.main'
+                                    : 'error.main',
                             mr: 0.5,
                             transform: minuteMetrics.increasePercentage < 0 ? 'rotate(180deg)' : 'none'
                           }}
@@ -549,9 +579,9 @@ const DashboardPage = () => {
                           sx={{
                             color:
                                 minuteMetrics.increasePercentage >= 0
-                                    ? '#34a853'
-                                    : '#ea4335',
-                            fontWeight: 500
+                                    ? 'success.main'
+                                    : 'error.main',
+                            fontWeight: 600
                           }}
                       >
                         {Math.abs(minuteMetrics.increasePercentage)}%
@@ -561,52 +591,56 @@ const DashboardPage = () => {
                 </Box>
               </Box>
             </MetricCard>
-          </Grid>
+          </AnimatedGridItem>
 
           {/* Global Request Counter */}
-          <Grid item xs={12} sm={6} md={3}>
+          <AnimatedGridItem item xs={12} sm={6} md={3}>
             <MetricCard>
               <Box sx={{ display: 'flex', alignItems: 'center' }}>
                 <Box
                     sx={{
-                      backgroundColor: '#e8f5e9',
+                      backgroundColor: 'rgba(255, 152, 0, 0.1)',
                       borderRadius: '50%',
-                      p: 1.5,
-                      mr: 2
+                      p: 2,
+                      mr: 2,
+                      color: 'primary.main'
                     }}
                 >
-                  <ComputerIcon />
+                  <ComputerIcon fontSize="medium" />
                 </Box>
                 <Box>
                   <Typography color="textSecondary" variant="subtitle2">
                     Total Requests
                   </Typography>
-                  <Typography variant="h4">{requestCount}</Typography>
+                  <Typography variant="h4" sx={{ color: 'primary.dark' }}>
+                    {requestCount}
+                  </Typography>
                 </Box>
               </Box>
             </MetricCard>
-          </Grid>
+          </AnimatedGridItem>
 
           {/* Rejected Requests This Minute */}
-          <Grid item xs={12} sm={6} md={3}>
+          <AnimatedGridItem item xs={12} sm={6} md={3}>
             <MetricCard>
               <Box sx={{ display: 'flex', alignItems: 'center' }}>
                 <Box
                     sx={{
-                      backgroundColor: '#fce8e6',
+                      backgroundColor: 'rgba(244, 67, 54, 0.1)',
                       borderRadius: '50%',
-                      p: 1.5,
-                      mr: 2
+                      p: 2,
+                      mr: 2,
+                      color: 'error.main'
                     }}
                 >
-                  <ErrorOutlineIcon fontSize="small" />
+                  <ErrorOutlineIcon fontSize="medium" />
                 </Box>
                 <Box>
                   <Typography color="textSecondary" variant="subtitle2">
                     Rejected This Minute
                   </Typography>
                   <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    <Typography variant="h4" sx={{ mr: 1 }}>
+                    <Typography variant="h4" sx={{ mr: 1, color: 'error.dark' }}>
                       {minuteMetrics.rejectedCurrentMinute}
                     </Typography>
                     <Box
@@ -615,10 +649,10 @@ const DashboardPage = () => {
                           alignItems: 'center',
                           backgroundColor:
                               minuteMetrics.rejectedIncreasePercentage >= 0
-                                  ? '#fce8e6'
-                                  : '#e6f4ea',
-                          borderRadius: '4px',
-                          px: 1,
+                                  ? 'rgba(244, 67, 54, 0.1)'
+                                  : 'rgba(76, 175, 80, 0.1)',
+                          borderRadius: '16px',
+                          px: 1.5,
                           py: 0.5
                         }}
                     >
@@ -627,8 +661,8 @@ const DashboardPage = () => {
                           sx={{
                             color:
                                 minuteMetrics.rejectedIncreasePercentage >= 0
-                                    ? '#ea4335'
-                                    : '#34a853',
+                                    ? 'error.main'
+                                    : 'success.main',
                             mr: 0.5,
                             transform:
                                 minuteMetrics.rejectedIncreasePercentage >= 0
@@ -641,9 +675,9 @@ const DashboardPage = () => {
                           sx={{
                             color:
                                 minuteMetrics.rejectedIncreasePercentage >= 0
-                                    ? '#ea4335'
-                                    : '#34a853',
-                            fontWeight: 500
+                                    ? 'error.main'
+                                    : 'success.main',
+                            fontWeight: 600
                           }}
                       >
                         {Math.abs(
@@ -656,14 +690,14 @@ const DashboardPage = () => {
                 </Box>
               </Box>
             </MetricCard>
-          </Grid>
+          </AnimatedGridItem>
         </Grid>
 
         {/* Routes Table */}
         <Box sx={{ mb: 3 }}>
           {loading && routes.length === 0 ? (
               <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
-                <CircularProgress />
+                <CircularProgress sx={{ color: 'primary.main' }} />
               </Box>
           ) : (
               <RouteTable
@@ -685,18 +719,25 @@ const DashboardPage = () => {
             onClose={handleCloseRouteDialog}
             fullWidth
             maxWidth="md"
+            PaperProps={{
+              sx: {
+                borderRadius: '16px',
+                background: 'linear-gradient(145deg, #ffffff, #fafafa)'
+              }
+            }}
         >
-          <DialogTitle>
+          <DialogTitle sx={{ bgcolor: 'primary.main', color: 'white', py: 2 }}>
             {routeDialog.isEdit ? 'Edit Route' : 'Add New Route'}
           </DialogTitle>
-          <DialogContent dividers>
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, py: 1 }}>
+          <DialogContent dividers sx={{ py: 3 }}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
               <TextField
                   label="Route ID"
                   name="routeId"
                   value={routeDialog.data.routeId}
                   onChange={handleRouteInputChange}
                   fullWidth
+                  variant="filled"
                   placeholder="e.g., my-service-route"
                   helperText="A unique identifier for this route (optional)"
               />
@@ -708,6 +749,7 @@ const DashboardPage = () => {
                   onChange={handleRouteInputChange}
                   fullWidth
                   required
+                  variant="filled"
                   placeholder="e.g., /api/service/**"
                   helperText="The path predicate pattern, '/**' will be added automatically if missing"
               />
@@ -719,63 +761,50 @@ const DashboardPage = () => {
                   onChange={handleRouteInputChange}
                   fullWidth
                   required
+                  variant="filled"
                   placeholder="e.g., http://localhost:8080"
                   helperText="The destination URI where requests will be forwarded"
               />
 
               <Box sx={{ mt: 2 }}>
-                <Typography variant="subtitle1" gutterBottom>
+                <Typography variant="subtitle1" gutterBottom sx={{ color: 'primary.main', fontWeight: 600 }}>
                   Security Settings
                 </Typography>
 
                 <Grid container spacing={2}>
-                  <Grid item xs={12} md={4}>
-                    <FormControlLabel
-                        control={
-                          <Switch
-                              name="withIpFilter"
-                              checked={routeDialog.data.withIpFilter}
-                              onChange={handleRouteInputChange}
-                              color="primary"
-                          />
-                        }
-                        label="IP Filtering"
-                    />
-                  </Grid>
-
-                  <Grid item xs={12} md={4}>
-                    <FormControlLabel
-                        control={
-                          <Switch
-                              name="withToken"
-                              checked={routeDialog.data.withToken}
-                              onChange={handleRouteInputChange}
-                              color="primary"
-                          />
-                        }
-                        label="Token Validation"
-                    />
-                  </Grid>
-
-                  <Grid item xs={12} md={4}>
-                    <FormControlLabel
-                        control={
-                          <Switch
-                              name="withRateLimit"
-                              checked={routeDialog.data.withRateLimit}
-                              onChange={handleRouteInputChange}
-                              color="primary"
-                          />
-                        }
-                        label="Rate Limiting"
-                    />
-                  </Grid>
+                  {['withIpFilter', 'withToken', 'withRateLimit'].map((setting, index) => (
+                      <Grid item xs={12} md={4} key={setting}>
+                        <FormControlLabel
+                            control={
+                              <Switch
+                                  name={setting}
+                                  checked={routeDialog.data[setting]}
+                                  onChange={handleRouteInputChange}
+                                  color="primary"
+                                  sx={{
+                                    '& .MuiSwitch-switchBase.Mui-checked': {
+                                      color: 'primary.main',
+                                    },
+                                    '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': {
+                                      backgroundColor: 'primary.main',
+                                    },
+                                  }}
+                              />
+                            }
+                            label={
+                              setting === 'withIpFilter' ? 'IP Filtering' :
+                                  setting === 'withToken' ? 'Token Validation' : 'Rate Limiting'
+                            }
+                            sx={{ '& .MuiFormControlLabel-label': { fontWeight: 500 } }}
+                        />
+                      </Grid>
+                  ))}
                 </Grid>
               </Box>
 
               {routeDialog.data.withRateLimit && (
-                  <Box sx={{ mt: 2, p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
-                    <Typography variant="subtitle2" gutterBottom>
+                  <Box sx={{ mt: 2, p: 2, bgcolor: 'rgba(255, 152, 0, 0.05)', borderRadius: 2 }}>
+                    <Typography variant="subtitle2" gutterBottom sx={{ color: 'primary.dark', fontWeight: 600 }}>
                       Rate Limit Settings
                     </Typography>
 
@@ -788,6 +817,7 @@ const DashboardPage = () => {
                             value={routeDialog.data.rateLimit?.maxRequests || 10}
                             onChange={handleRateLimitChange}
                             fullWidth
+                            variant="filled"
                             InputProps={{ inputProps: { min: 1 } }}
                             helperText="Maximum number of requests allowed"
                         />
@@ -801,6 +831,7 @@ const DashboardPage = () => {
                             value={routeDialog.data.rateLimit?.timeWindowMs || 60000}
                             onChange={handleRateLimitChange}
                             fullWidth
+                            variant="filled"
                             InputProps={{ inputProps: { min: 1000, step: 1000 } }}
                             helperText="Time window in milliseconds (e.g., 60000 = 1 minute)"
                         />
@@ -810,17 +841,29 @@ const DashboardPage = () => {
               )}
             </Box>
           </DialogContent>
-          <DialogActions>
-            <Button onClick={handleCloseRouteDialog}>
+          <DialogActions sx={{ px: 3, py: 2 }}>
+            <Button
+                onClick={handleCloseRouteDialog}
+                variant="outlined"
+                sx={{
+                  color: 'text.primary',
+                  borderColor: 'divider',
+                  '&:hover': { borderColor: 'primary.main' }
+                }}
+            >
               Cancel
             </Button>
             <Button
                 onClick={handleSaveRoute}
                 variant="contained"
-                color="primary"
                 disabled={loading}
+                sx={{
+                  bgcolor: 'primary.main',
+                  '&:hover': { bgcolor: 'primary.dark' },
+                  '&:disabled': { bgcolor: 'action.disabledBackground' }
+                }}
             >
-              {loading ? <CircularProgress size={24} /> : routeDialog.isEdit ? 'Update' : 'Create'}
+              {loading ? <CircularProgress size={24} sx={{ color: 'white' }} /> : routeDialog.isEdit ? 'Update' : 'Create'}
             </Button>
           </DialogActions>
         </Dialog>
@@ -829,24 +872,45 @@ const DashboardPage = () => {
         <Dialog
             open={deleteConfirm.open}
             onClose={() => setDeleteConfirm({ open: false, routeId: null })}
+            PaperProps={{
+              sx: {
+                borderRadius: '16px',
+                border: '2px solid',
+                borderColor: 'error.light'
+              }
+            }}
         >
-          <DialogTitle>Confirm Deletion</DialogTitle>
+          <DialogTitle sx={{ color: 'error.main', fontWeight: 600 }}>
+            Confirm Deletion
+          </DialogTitle>
           <DialogContent>
             <Typography>
               Are you sure you want to delete this route? This action cannot be undone.
             </Typography>
           </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setDeleteConfirm({ open: false, routeId: null })}>
+          <DialogActions sx={{ px: 3, py: 2 }}>
+            <Button
+                onClick={() => setDeleteConfirm({ open: false, routeId: null })}
+                variant="outlined"
+                sx={{
+                  color: 'text.primary',
+                  borderColor: 'divider',
+                  '&:hover': { borderColor: 'error.main' }
+                }}
+            >
               Cancel
             </Button>
             <Button
                 onClick={confirmDelete}
                 variant="contained"
-                color="error"
                 disabled={loading}
+                sx={{
+                  bgcolor: 'error.main',
+                  '&:hover': { bgcolor: 'error.dark' },
+                  '&:disabled': { bgcolor: 'action.disabledBackground' }
+                }}
             >
-              {loading ? <CircularProgress size={24} /> : 'Delete'}
+              {loading ? <CircularProgress size={24} sx={{ color: 'white' }} /> : 'Delete'}
             </Button>
           </DialogActions>
         </Dialog>
@@ -862,7 +926,14 @@ const DashboardPage = () => {
           <Alert
               onClose={handleCloseNotification}
               severity={notification.severity}
-              sx={{ width: '100%' }}
+              sx={{
+                width: '100%',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+                alignItems: 'center',
+                '& .MuiAlert-icon': {
+                  color: notification.severity === 'info' ? 'primary.main' : undefined
+                }
+              }}
               action={notification.action}
           >
             {notification.message}
