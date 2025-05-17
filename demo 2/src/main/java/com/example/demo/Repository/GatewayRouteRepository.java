@@ -15,4 +15,7 @@ public interface GatewayRouteRepository extends JpaRepository<GatewayRoute, Long
     List<GatewayRoute> findAllWithAllowedIpsAndRateLimit();
 
     GatewayRoute findByPredicates(String predicates);
+
+    // Add this method to find routes by routeId
+    GatewayRoute findByRouteId(String routeId);
 }

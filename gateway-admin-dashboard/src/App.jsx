@@ -1,4 +1,3 @@
-// src/App.jsx
 import React, { useEffect, useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import LoginPage from './pages/LoginPage.jsx';
@@ -6,6 +5,7 @@ import DashboardPage from './pages/DashboardPage.jsx';
 import IPManagementPage from './pages/IPManagementPage.jsx';
 import RateLimitPage from './pages/RateLimitPage.jsx';
 import SystemSettingsPage from './pages/SystemSettingsPage.jsx';
+import AnalyticsPage from './pages/AnalyticsPage.jsx'; // Import the new Analytics page
 import DashboardLayout from 'src/layout/DashboardLayout.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 // Update the import to use the correct file and extension:
@@ -39,6 +39,7 @@ const App = () => {
                     }
                 >
                     <Route path="/dashboard" element={<DashboardPage />} />
+                    <Route path="/analytics" element={<AnalyticsPage />} /> {/* Add the Analytics route */}
                     <Route path="/ip-management" element={<IPManagementPage />} />
                     <Route path="/rate-limits" element={<RateLimitPage />} />
                     <Route path="/system-settings" element={<SystemSettingsPage />} />

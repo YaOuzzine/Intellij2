@@ -56,12 +56,6 @@ apiClient.interceptors.response.use(
                 data: error.response?.data
             });
 
-            // TEMPORARY DEBUG MODE - Comment out the logout code
-            console.warn('⚠️ DEBUG MODE: 401 Error detected but auto-logout disabled for debugging');
-            console.warn('⚠️ Path causing 401:', originalRequest?.url);
-            console.warn('⚠️ Would normally logout the user here');
-
-            /* COMMENTED OUT FOR DEBUGGING
             // Only clear token/redirect for certain 401 errors (not login attempts)
             if (originalRequest.url !== '/auth/login') {
                 console.warn('Token expired or invalid, logging out.');
@@ -73,7 +67,6 @@ apiClient.interceptors.response.use(
                     window.location.href = '/login';
                 }
             }
-            */
         }
         return Promise.reject(error);
     }

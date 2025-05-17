@@ -5,7 +5,10 @@ import com.example.demo.Repository.GatewayRouteRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cloud.gateway.filter.GatewayFilter;
+import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.factory.AbstractGatewayFilterFactory;
+import org.springframework.cloud.gateway.support.ServerWebExchangeUtils;
+import org.springframework.cloud.gateway.route.Route;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
@@ -14,7 +17,7 @@ import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
-import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Component
@@ -39,65 +42,105 @@ public class TokenValidationGatewayFilterFactory extends AbstractGatewayFilterFa
             String requestPath = exchange.getRequest().getURI().getPath();
             log.info("Token Validation Filter: requestPath={}", requestPath);
 
-            // Load all routes from the database.
-            List<GatewayRoute> allRoutes = gatewayRouteRepository.findAll();
-            if (allRoutes.isEmpty()) {
-                log.error("No routes found in the database.");
-                exchange.getResponse().setStatusCode(HttpStatus.NOT_FOUND);
-                return exchange.getResponse().setComplete();
-            }
-
-            // Match route using prefix matching (consistent with other filters)
-            GatewayRoute matchingRoute = null;
-            for (GatewayRoute route : allRoutes) {
-                String routePredicate = route.getPredicates();
-                // Remove '/**' suffix if present for consistent matching
-                if (routePredicate.endsWith("/**")) {
-                    routePredicate = routePredicate.substring(0, routePredicate.length() - 3);
-                }
-                if (requestPath.startsWith(routePredicate)) {
-                    matchingRoute = route;
-                    break;
-                }
-            }
-
-            if (matchingRoute == null) {
-                log.warn("No matching route found for path={}", requestPath);
+            // First, get the route from the exchange
+            Route route = exchange.getAttribute(ServerWebExchangeUtils.GATEWAY_ROUTE_ATTR);
+            if (route == null) {
+                log.warn("No route found in exchange attributes for path: {}", requestPath);
                 return chain.filter(exchange);
             }
 
-            log.info("Matching route found: {} with token validation enabled: {}",
-                    matchingRoute.getRouteId(), matchingRoute.getWithToken());
+            // Get the route ID
+            String routeId = route.getId();
+            log.info("Processing token validation for route: {}", routeId);
 
-            // Proceed with token validation only if enabled.
-            if (!Boolean.TRUE.equals(matchingRoute.getWithToken())) {
-                log.info("Token validation is disabled for route {}. Passing request along.", matchingRoute.getRouteId());
-                return chain.filter(exchange);
-            }
+            // Check direct database for current withToken value
+            return Mono.fromCallable(() -> {
+                        // This runs in a separate thread to avoid blocking the event loop
+                        Boolean withTokenMetadata = null;
 
-            HttpHeaders headers = exchange.getRequest().getHeaders();
-            String authHeader = headers.getFirst(HttpHeaders.AUTHORIZATION);
-            if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-                log.warn("Missing or invalid Authorization header for route {}.", matchingRoute.getRouteId());
-                exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
-                return exchange.getResponse().setComplete();
-            }
+                        // First try to get from metadata (this is faster)
+                        Map<String, Object> metadata = route.getMetadata();
+                        if (metadata != null && metadata.containsKey("withToken")) {
+                            withTokenMetadata = (Boolean) metadata.get("withToken");
+                            log.info("Route metadata indicates withToken={} for route {}", withTokenMetadata, routeId);
+                        }
 
-            String token = authHeader.substring(7);
-            log.info("Extracted token for route {}.", matchingRoute.getRouteId());
-            final GatewayRoute finalRoute = matchingRoute;
+                        // If metadata doesn't have the value or to double-check, query the database
+                        GatewayRoute dbRoute = null;
+                        try {
+                            // Extract numeric ID if route ID is in format "route-X"
+                            Long numericId = null;
+                            if (routeId.startsWith("route-")) {
+                                try {
+                                    numericId = Long.parseLong(routeId.substring(6));
+                                } catch (NumberFormatException e) {
+                                    // Not a numeric ID, will try to find by routeId
+                                }
+                            }
 
-            return Mono.just(token)
-                    .subscribeOn(Schedulers.boundedElastic())
-                    .flatMap(jwtDecoder::decode)
-                    .flatMap(jwt -> {
-                        log.info("Token is valid for route {}.", finalRoute.getRouteId());
-                        return chain.filter(exchange);
+                            // Try to find route in database
+                            if (numericId != null) {
+                                dbRoute = gatewayRouteRepository.findById(numericId).orElse(null);
+                            } else {
+                                dbRoute = gatewayRouteRepository.findByRouteId(routeId);
+                            }
+
+                            if (dbRoute != null) {
+                                Boolean dbWithToken = dbRoute.getWithToken();
+                                log.info("Database value for withToken={} for route {}", dbWithToken, routeId);
+
+                                // If metadata and DB values don't match, log a warning
+                                if (withTokenMetadata != null && !withTokenMetadata.equals(dbWithToken)) {
+                                    log.warn("Metadata withToken={} doesn't match database withToken={} for route {}. Using database value.",
+                                            withTokenMetadata, dbWithToken, routeId);
+                                }
+
+                                // Always prefer the database value
+                                return dbWithToken;
+                            } else {
+                                log.warn("Could not find route {} in database", routeId);
+                            }
+                        } catch (Exception e) {
+                            log.error("Error querying database for route {}: {}", routeId, e.getMessage(), e);
+                        }
+
+                        // If we couldn't get from DB, fall back to metadata
+                        return withTokenMetadata;
                     })
-                    .onErrorResume(e -> {
-                        log.warn("Token validation failed for route {}: {}", finalRoute.getRouteId(), e.getMessage());
-                        exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
-                        return exchange.getResponse().setComplete();
+                    .subscribeOn(Schedulers.boundedElastic())
+                    .defaultIfEmpty(Boolean.FALSE) // Default to NOT requiring token if we can't determine
+                    .flatMap(withToken -> {
+                        if (!Boolean.TRUE.equals(withToken)) {
+                            log.info("Token validation SKIPPED for path {} (withToken={})", requestPath, withToken);
+                            return chain.filter(exchange);
+                        }
+
+                        log.info("Token validation REQUIRED for path {} (withToken=true)", requestPath);
+
+                        // Validate token
+                        HttpHeaders headers = exchange.getRequest().getHeaders();
+                        String authHeader = headers.getFirst(HttpHeaders.AUTHORIZATION);
+
+                        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+                            log.warn("Missing or invalid Authorization header for path: {}", requestPath);
+                            exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
+                            return exchange.getResponse().setComplete();
+                        }
+
+                        String token = authHeader.substring(7);
+                        log.info("Validating token for path: {}", requestPath);
+
+                        return Mono.just(token)
+                                .flatMap(jwtDecoder::decode)
+                                .flatMap(jwt -> {
+                                    log.info("Token is valid for path: {}", requestPath);
+                                    return chain.filter(exchange);
+                                })
+                                .onErrorResume(e -> {
+                                    log.warn("Token validation failed for path {}: {}", requestPath, e.getMessage());
+                                    exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
+                                    return exchange.getResponse().setComplete();
+                                });
                     });
         };
     }

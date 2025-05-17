@@ -6,12 +6,10 @@ import com.example.demo.Repository.GatewayRouteRepository;
 import com.example.demo.Filter.IpValidationGatewayFilterFactory;
 import com.example.demo.Filter.TokenValidationGatewayFilterFactory;
 import com.example.demo.Filter.SimpleRateLimitGatewayFilterFactory;
-import com.example.demo.Filter.RequestCountFilter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cloud.gateway.event.RefreshRoutesEvent;
 import org.springframework.cloud.gateway.filter.GatewayFilter;
-import org.springframework.cloud.gateway.filter.OrderedGatewayFilter;
 import org.springframework.cloud.gateway.filter.factory.RewritePathGatewayFilterFactory;
 import org.springframework.cloud.gateway.handler.predicate.PathRoutePredicateFactory;
 import org.springframework.cloud.gateway.route.Route;
@@ -125,10 +123,10 @@ public class DynamicRouteConfig {
                     log.info("Added IP filter to route {}", routeId);
                 }
 
-                if (Boolean.TRUE.equals(r.getWithToken())) {
-                    filters.add(tokenFactory.apply((Void) null));
-                    log.info("Added token filter to route {}", routeId);
-                }
+                // IMPORTANT CHANGE: Always add the token filter
+                // The filter itself will check the withToken flag and skip validation if needed
+                filters.add(tokenFactory.apply((Void) null));
+                log.info("Added token filter to route {} (withToken = {})", routeId, r.getWithToken());
 
                 if (Boolean.TRUE.equals(r.getWithRateLimit()) && r.getRateLimit() != null) {
                     routeBuilder.metadata("maxRequests", r.getRateLimit().getMaxRequests())

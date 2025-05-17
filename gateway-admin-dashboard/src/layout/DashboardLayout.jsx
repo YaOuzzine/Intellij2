@@ -1,4 +1,3 @@
-// src/layout/DashboardLayout.jsx
 import React, { useState, useEffect } from 'react';
 import { Box, Typography, IconButton, Tooltip } from '@mui/material';
 import { styled, keyframes } from '@mui/material/styles';
@@ -8,6 +7,7 @@ import DashboardOutlinedIcon from '@mui/icons-material/DashboardOutlined';
 import SpeedOutlinedIcon from '@mui/icons-material/SpeedOutlined';
 import ComputerOutlinedIcon from '@mui/icons-material/ComputerOutlined';
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
+import InsightsOutlinedIcon from '@mui/icons-material/InsightsOutlined'; // Import the Analytics icon
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import { NavHighlightContext } from '../pages/DashboardPage';
 
@@ -77,13 +77,19 @@ const DashboardLayout = () => {
   const location = useLocation();
   const [highlightedNav, setHighlightedNav] = useState(null);
 
-  // Updated navigation items (Gateway Routes removed)
+  // Updated navigation items with Analytics page
   const navItems = [
     {
       id: 'DASHBOARD',
       label: 'Dashboard',
       icon: <DashboardOutlinedIcon />,
       path: '/dashboard'
+    },
+    {
+      id: 'ANALYTICS', // Add Analytics nav item
+      label: 'Analytics',
+      icon: <InsightsOutlinedIcon />,
+      path: '/analytics'
     },
     {
       id: 'RATE_LIMITS',
