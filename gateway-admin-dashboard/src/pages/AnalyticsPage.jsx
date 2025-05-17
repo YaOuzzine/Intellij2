@@ -1,3 +1,4 @@
+// src/pages/AnalyticsPage.jsx
 import React, { useState, useEffect } from 'react';
 import {
     Typography,
@@ -14,10 +15,31 @@ import {
     ToggleButtonGroup,
     ToggleButton,
     Tooltip,
-    Button
+    Button,
+    Tabs,
+    Tab,
+    Divider,
+    useTheme,
+    useMediaQuery
 } from '@mui/material';
 import { styled, alpha, keyframes } from '@mui/material/styles';
-import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts';
+import {
+    LineChart,
+    Line,
+    BarChart,
+    Bar,
+    PieChart,
+    Pie,
+    Cell,
+    AreaChart,
+    Area,
+    XAxis,
+    YAxis,
+    CartesianGrid,
+    Tooltip as RechartsTooltip,
+    Legend,
+    ResponsiveContainer
+} from 'recharts';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import DateRangeIcon from '@mui/icons-material/DateRange';
 import NetworkCheckIcon from '@mui/icons-material/NetworkCheck';
@@ -25,8 +47,12 @@ import SecurityIcon from '@mui/icons-material/Security';
 import SpeedIcon from '@mui/icons-material/Speed';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import InsightsIcon from '@mui/icons-material/Insights';
+import TimelineIcon from '@mui/icons-material/Timeline';
+import PieChartIcon from '@mui/icons-material/PieChart';
+import BarChartIcon from '@mui/icons-material/BarChart';
 import SyncButton from '../components/SyncButton';
-import { api, apiClient } from '../services/api';
+import { apiClient } from '../services/api';
 
 // Animations
 const fadeIn = keyframes`
@@ -42,7 +68,7 @@ const pulse = keyframes`
 
 // Styled components
 const StyledCard = styled(Card)(({ theme }) => ({
-    borderRadius: '12px',
+    borderRadius: '16px',
     boxShadow: '0 8px 16px rgba(0, 0, 0, 0.1)',
     height: '100%',
     transition: 'all 0.3s ease',
@@ -67,9 +93,12 @@ const MetricValue = styled(Typography)(({ theme }) => ({
 
 const ChartContainer = styled(Paper)(({ theme }) => ({
     padding: theme.spacing(3),
-    borderRadius: '12px',
+    borderRadius: '16px',
     boxShadow: '0 8px 16px rgba(0, 0, 0, 0.1)',
     animation: `${fadeIn} 0.6s ease-out`,
+    minHeight: '500px', // Ensure consistent height for all charts
+    display: 'flex',
+    flexDirection: 'column',
 }));
 
 const RefreshButton = styled(Button)(({ theme }) => ({
@@ -95,19 +124,66 @@ const TimeRangeToggle = styled(ToggleButtonGroup)(({ theme }) => ({
     },
 }));
 
+const StyledTabs = styled(Tabs)(({ theme }) => ({
+    marginBottom: theme.spacing(3),
+    '& .MuiTab-root': {
+        minWidth: 'auto',
+        padding: theme.spacing(1.5, 2),
+        textTransform: 'none',
+        fontWeight: 500,
+        borderRadius: '8px 8px 0 0',
+        transition: 'all 0.2s ease',
+        '&.Mui-selected': {
+            fontWeight: 700,
+            color: theme.palette.primary.main,
+        },
+    },
+    '& .MuiTabs-indicator': {
+        height: 3,
+        borderRadius: '3px 3px 0 0',
+    },
+}));
+
 // Chart colors
 const COLORS = ['#FF914D', '#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#A569BD'];
 const REJECTION_COLORS = {
-    'IP Filter': '#FF5252',
+    'IP Filter': '#9528eb',
     'Token Validation': '#FF9800',
     'Rate Limit': '#F44336',
     'Invalid Request': '#9C27B0',
     'Other': '#795548'
 };
 
-const ROUTE_COLORS = {};
+// Tab panel component
+function TabPanel(props) {
+    const { children, value, index, ...other } = props;
+
+    return (
+        <div
+            role="tabpanel"
+            hidden={value !== index}
+            id={`analytics-tabpanel-${index}`}
+            aria-labelledby={`analytics-tab-${index}`}
+            style={{ height: '100%', width: '100%' }}
+            {...other}
+        >
+            {value === index && (
+                <Box sx={{ height: '100%', pt: 2 }}>
+                    {children}
+                </Box>
+            )}
+        </div>
+    );
+}
 
 const AnalyticsPage = () => {
+    const theme = useTheme();
+    const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+    const isTablet = useMediaQuery(theme.breakpoints.down('lg'));
+
+    // State for tab selection
+    const [tabValue, setTabValue] = useState(0);
+
     // State for metrics data
     const [overviewMetrics, setOverviewMetrics] = useState({
         totalRequests: 0,
@@ -137,10 +213,16 @@ const AnalyticsPage = () => {
     // State for error handling
     const [error, setError] = useState(null);
 
+    // Handle tab change
+    const handleChangeTab = (event, newValue) => {
+        setTabValue(newValue);
+    };
+
     // Initial data loading
     useEffect(() => {
         fetchAllData()
             .catch(err => {
+                console.error("Error fetching data:", err);
                 if (err.response?.status === 401) {
                     setError("Authentication error. Please log in again.");
                 } else {
@@ -171,14 +253,19 @@ const AnalyticsPage = () => {
             ]);
 
             // Process routes for the dropdown
-            if (routes.length === 0) {
-                const routeData = routesResponse.data.map(route => ({
-                    id: route.id,
-                    label: route.predicates || `Route ${route.id}`,
-                    value: route.id
-                }));
-                setRoutes([{ id: 'all', label: 'All Routes', value: 'all' }, ...routeData]);
-            }
+            const fetchedAdminRoutes = routesResponse.data;
+            const routeDataForDropdown = fetchedAdminRoutes.map(adminRoute => {
+                // Determine the string routeId as used by the AnalyticsService in 'demo 2'
+                // This matches how 'demo 2/Controller/MetricsController.java' (and DynamicRouteConfig) generates it
+                // adminRoute.routeId is the custom string ID from admin.gateway_routes. adminRoute.id is the PK.
+                const analyticsServiceRouteId = adminRoute.routeId && adminRoute.routeId.trim() !== '' ? adminRoute.routeId : `route-${adminRoute.id}`;
+                return {
+                    id: adminRoute.id, // Original DB id from admin schema, useful for React keys
+                    label: adminRoute.predicates || analyticsServiceRouteId, // Display predicate or the string routeId
+                    value: analyticsServiceRouteId // This is the value to be sent to /api/metrics/timeseries
+                };
+            });
+            setRoutes([{ id: 'all', label: 'All Routes', value: 'all' }, ...routeDataForDropdown]);
 
             // Process metrics data
             const { requestCount, rejectedCount } = requestsResponse.data;
@@ -261,6 +348,7 @@ const AnalyticsPage = () => {
     const handleRefresh = () => {
         fetchAllData(true)
             .catch(err => {
+                console.error("Error during refresh:", err);
                 if (err.response?.status === 401) {
                     setError("Authentication error. Please log in again.");
                 } else {
@@ -323,6 +411,7 @@ const AnalyticsPage = () => {
                         onClick={() => {
                             setError(null);
                             fetchAllData().catch(err => {
+                                console.error("Error retry:", err);
                                 if (err.response?.status === 401) {
                                     setError("Authentication error. Please log in again.");
                                 } else {
@@ -341,19 +430,20 @@ const AnalyticsPage = () => {
     return (
         <Box sx={{ p: 3, animation: `${fadeIn} 0.6s ease-out` }}>
             {/* Header */}
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4, flexWrap: 'wrap', gap: 2 }}>
                 <Typography variant="h4" component="h1" sx={{ fontWeight: 700, color: 'primary.main' }}>
                     Traffic Analytics
                 </Typography>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
                     {/* Time range selector */}
                     <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                        <DateRangeIcon sx={{ mr: 1, color: 'text.secondary' }} />
+                        <DateRangeIcon sx={{ mr: 1, color: 'text.secondary', display: { xs: 'none', sm: 'block' } }} />
                         <TimeRangeToggle
                             value={timeRange}
                             exclusive
                             onChange={handleTimeRangeChange}
                             aria-label="time range"
+                            size={isMobile ? "small" : "medium"}
                         >
                             <ToggleButton value="1h">Last Hour</ToggleButton>
                             <ToggleButton value="24h">24 Hours</ToggleButton>
@@ -362,7 +452,7 @@ const AnalyticsPage = () => {
                     </Box>
 
                     {/* Route filter */}
-                    <FormControl size="small" sx={{ minWidth: 200 }}>
+                    <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 200 } }}>
                         <InputLabel id="route-select-label">Route</InputLabel>
                         <Select
                             labelId="route-select-label"
@@ -563,15 +653,54 @@ const AnalyticsPage = () => {
                 </Grid>
             </Grid>
 
-            {/* Charts */}
-            <Grid container spacing={3}>
-                {/* Traffic Over Time */}
-                <Grid item xs={12} lg={8}>
-                    <ChartContainer>
+            {/* Chart Tabs */}
+            <ChartContainer>
+                <StyledTabs
+                    value={tabValue}
+                    onChange={handleChangeTab}
+                    variant={isMobile ? "scrollable" : "fullWidth"}
+                    scrollButtons={isMobile ? "auto" : false}
+                    aria-label="analytics charts tabs"
+                >
+                    <Tab
+                        icon={<TimelineIcon />}
+                        iconPosition="start"
+                        label="Traffic Over Time"
+                        id="analytics-tab-0"
+                        aria-controls="analytics-tabpanel-0"
+                    />
+                    <Tab
+                        icon={<PieChartIcon />}
+                        iconPosition="start"
+                        label="Rejection Reasons"
+                        id="analytics-tab-1"
+                        aria-controls="analytics-tabpanel-1"
+                    />
+                    <Tab
+                        icon={<InsightsIcon />}
+                        iconPosition="start"
+                        label="Response Time"
+                        id="analytics-tab-2"
+                        aria-controls="analytics-tabpanel-2"
+                    />
+                    <Tab
+                        icon={<BarChartIcon />}
+                        iconPosition="start"
+                        label="Traffic by Route"
+                        id="analytics-tab-3"
+                        aria-controls="analytics-tabpanel-3"
+                    />
+                </StyledTabs>
+
+                <Divider sx={{ mb: 3 }} />
+
+                {/* Traffic Over Time Tab Panel */}
+                <TabPanel value={tabValue} index={0}>
+                    <Box sx={{ height: 400 }}>
                         <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
                             Traffic Over Time
                         </Typography>
-                        <ResponsiveContainer width="100%" height={320}>
+                        <ResponsiveContainer width="100%" height="100%">
                             <AreaChart
                                 data={timeSeriesData}
                                 margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
@@ -601,30 +730,30 @@ const AnalyticsPage = () => {
                                 />
                             </AreaChart>
                         </ResponsiveContainer>
-                    </ChartContainer>
-                </Grid>
+                    </Box>
+                </TabPanel>
 
-                {/* Rejection Reasons */}
-                <Grid item xs={12} md={6} lg={4}>
-                    <ChartContainer>
+                {/* Rejection Reasons Tab Panel */}
+                <TabPanel value={tabValue} index={1}>
+                    <Box sx={{ height: 400 }}>
                         <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
                             Rejection Reasons
                         </Typography>
                         {rejectionData.length === 0 ? (
-                            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 280 }}>
+                            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80%' }}>
                                 <Typography variant="body1" color="text.secondary">
                                     No rejected requests to display
                                 </Typography>
                             </Box>
                         ) : (
-                            <ResponsiveContainer width="100%" height={280}>
+                            <ResponsiveContainer width="100%" height="100%">
                                 <PieChart>
                                     <Pie
                                         data={rejectionData}
                                         cx="50%"
                                         cy="50%"
                                         labelLine={false}
-                                        outerRadius={100}
+                                        outerRadius={150}
                                         fill="#8884d8"
                                         dataKey="value"
                                         nameKey="name"
@@ -642,16 +771,16 @@ const AnalyticsPage = () => {
                                 </PieChart>
                             </ResponsiveContainer>
                         )}
-                    </ChartContainer>
-                </Grid>
+                    </Box>
+                </TabPanel>
 
-                {/* Response Time */}
-                <Grid item xs={12} md={6} lg={6}>
-                    <ChartContainer>
+                {/* Response Time Tab Panel */}
+                <TabPanel value={tabValue} index={2}>
+                    <Box sx={{ height: 400 }}>
                         <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
                             Response Time
                         </Typography>
-                        <ResponsiveContainer width="100%" height={280}>
+                        <ResponsiveContainer width="100%" height="100%">
                             <LineChart
                                 data={responseTimeData}
                                 margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
@@ -681,16 +810,16 @@ const AnalyticsPage = () => {
                                 />
                             </LineChart>
                         </ResponsiveContainer>
-                    </ChartContainer>
-                </Grid>
+                    </Box>
+                </TabPanel>
 
-                {/* Routes Distribution */}
-                <Grid item xs={12} md={6} lg={6}>
-                    <ChartContainer>
+                {/* Traffic by Route Tab Panel */}
+                <TabPanel value={tabValue} index={3}>
+                    <Box sx={{ height: 400 }}>
                         <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
                             Traffic by Route
                         </Typography>
-                        <ResponsiveContainer width="100%" height={280}>
+                        <ResponsiveContainer width="100%" height="100%">
                             <BarChart
                                 data={routeDistribution}
                                 margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
@@ -707,9 +836,9 @@ const AnalyticsPage = () => {
                                 </Bar>
                             </BarChart>
                         </ResponsiveContainer>
-                    </ChartContainer>
-                </Grid>
-            </Grid>
+                    </Box>
+                </TabPanel>
+            </ChartContainer>
         </Box>
     );
 };

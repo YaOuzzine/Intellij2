@@ -1,3 +1,4 @@
+// demo 2/src/main/java/com/example/demo/Filter/RequestCountFilter.java
 package com.example.demo.Filter;
 
 import com.example.demo.Service.AnalyticsService;
@@ -12,6 +13,10 @@ import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.server.WebFilter;
 import org.springframework.web.server.WebFilterChain;
 import reactor.core.publisher.Mono;
+
+// Required imports for the fix
+import org.springframework.cloud.gateway.route.Route; // Added for the fix
+import org.springframework.cloud.gateway.support.ServerWebExchangeUtils; // Added for the fix
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -39,9 +44,11 @@ public class RequestCountFilter implements WebFilter {
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         String path = exchange.getRequest().getURI().getPath();
+        log.debug("[RequestCountFilter] Processing request for path: {}", path);
 
         // Skip metrics endpoints.
         if (path.startsWith("/api/metrics")) {
+            log.trace("[RequestCountFilter] Skipping metrics endpoint: {}", path);
             return chain.filter(exchange);
         }
 
@@ -51,13 +58,35 @@ public class RequestCountFilter implements WebFilter {
         // Track request start time for response time calculation
         long startTime = System.currentTimeMillis();
 
+        // --- OLD CODE for routeId determination ---
+        /*
         // Extract the routeId from the exchange attributes if available
         // Make it final to avoid the lambda capture issue
         final String routeId = (String) exchange.getAttribute("routeId") != null ?
                 (String) exchange.getAttribute("routeId") : "unknown";
+        */
+        // --- END OF OLD CODE ---
+
+        // --- NEW CODE for routeId determination (THE FIX) ---
+        // Spring Cloud Gateway sets the matched Route object in the exchange attributes.
+        Route gatewayRoute = exchange.getAttribute(ServerWebExchangeUtils.GATEWAY_ROUTE_ATTR);
+
+        final String routeId;
+        if (gatewayRoute != null) {
+            routeId = gatewayRoute.getId(); // This ID is set in DynamicRouteConfig (e.g., "route-1", "my-custom-id")
+            log.debug("[RequestCountFilter] Matched gateway route ID: '{}' for path: {}", routeId, path);
+            // Optionally, if other downstream filters specifically expect an attribute named "routeId":
+            // exchange.getAttributes().put("routeId", routeId); // Example: if another filter needs it by this specific key
+        } else {
+            // This case should ideally not happen for requests that are successfully routed by the gateway.
+            // It might occur for requests that don't match any defined gateway route (e.g. 404s not handled by a route).
+            routeId = "UNMATCHED_GATEWAY_REQUEST"; // A more descriptive fallback
+            log.warn("[RequestCountFilter] No GATEWAY_ROUTE_ATTR found in exchange for path: {}. Metrics will be recorded under '{}'", path, routeId);
+        }
+        // --- END OF NEW CODE ---
 
         // Always count this incoming request as accepted initially.
-        log.debug("Counting request for path: {} with routeId: {}, second: {}", path, routeId, currentSecond);
+        log.debug("[RequestCountFilter] Counting request for path: {} with resolved routeId: '{}', currentSecond: {}", path, routeId, currentSecond);
         totalRequestCount.incrementAndGet();
         requestsPerSecond
                 .computeIfAbsent(currentSecond, k -> new AtomicLong(0))
@@ -65,7 +94,10 @@ public class RequestCountFilter implements WebFilter {
 
         // Record in analytics service
         if (analyticsService != null) {
-            analyticsService.recordRequest(routeId);
+            log.debug("[RequestCountFilter] Recording request in AnalyticsService for routeId: '{}'", routeId);
+            analyticsService.recordRequest(routeId); // Pass the correctly resolved routeId
+        } else {
+            log.warn("[RequestCountFilter] AnalyticsService is null. Cannot record request for routeId: '{}'", routeId);
         }
 
         // Update current minute if needed.
@@ -84,18 +116,25 @@ public class RequestCountFilter implements WebFilter {
         // Proceed with downstream chain and then check the final status code.
         return chain.filter(exchange)
                 .doFinally(signalType -> {
+                    log.trace("[RequestCountFilter] doFinally triggered for routeId: '{}', signalType: {}", routeId, signalType);
                     // Get the final status code
                     HttpStatusCode finalStatus = exchange.getResponse().getStatusCode();
+                    log.debug("[RequestCountFilter] Final status for routeId '{}': {}", routeId, finalStatus);
+
                     // Check if the status code indicates an error (4xx or 5xx)
                     if (finalStatus != null && (finalStatus.value() >= 400 && finalStatus.value() < 600)) {
                         String reason = determineRejectionReason(finalStatus, exchange);
-                        countRejectedRequest(reason, routeId);
+                        log.info("[RequestCountFilter] Request for routeId '{}' resulted in status {} ({}). Rejection reason: {}", routeId, finalStatus.value(), finalStatus.isError(), reason);
+                        countRejectedRequest(reason, routeId); // Pass the correctly resolved routeId
                     }
 
                     // Calculate and record response time
                     long responseTime = System.currentTimeMillis() - startTime;
+                    log.debug("[RequestCountFilter] Response time for routeId '{}': {} ms", routeId, responseTime);
                     if (analyticsServiceFinal != null) {
-                        analyticsServiceFinal.recordResponseTime(routeId, responseTime);
+                        analyticsServiceFinal.recordResponseTime(routeId, responseTime); // Pass the correctly resolved routeId
+                    } else {
+                        log.warn("[RequestCountFilter] AnalyticsService (final) is null. Cannot record response time for routeId: '{}'", routeId);
                     }
                 });
     }
@@ -123,31 +162,34 @@ public class RequestCountFilter implements WebFilter {
         else {
             reason = "Other (" + status.value() + ")";
         }
-
+        log.trace("[RequestCountFilter] Determined rejection reason: '{}' for status: {}", reason, status);
         return reason;
     }
 
     // Method to count a rejected request with a name.
     public static void countRejectedRequest(String rejectName, String routeId) {
         long currentSecond = System.currentTimeMillis() / 1000;
-        log.debug("Rejected request: {} for routeId: {}, second: {}", rejectName, routeId, currentSecond);
+        log.debug("[RequestCountFilter] Counting rejected request: '{}' for routeId: '{}', second: {}", rejectName, routeId, currentSecond);
 
         totalRejectedCount.incrementAndGet();
         rejectedPerSecond.computeIfAbsent(currentSecond, k -> new AtomicLong(0))
                 .incrementAndGet();
 
         // Store rejection reason for analytics
-        rejectionReasons.put("reject-" + System.nanoTime(), rejectName);
+        rejectionReasons.put("reject-" + System.nanoTime(), rejectName); // Key needs to be unique
 
         // Access the analytics service through the ApplicationContextHolder
         // This avoids the need to reference the instance field from a static context
         try {
-            AnalyticsService analyticsService = ApplicationContextHolder.getBean(AnalyticsService.class);
-            if (analyticsService != null) {
-                analyticsService.recordRejection(routeId, rejectName);
+            AnalyticsService staticAnalyticsService = ApplicationContextHolder.getBean(AnalyticsService.class);
+            if (staticAnalyticsService != null) {
+                log.debug("[RequestCountFilter] Recording rejection in AnalyticsService (via ApplicationContextHolder) for routeId: '{}', reason: '{}'", routeId, rejectName);
+                staticAnalyticsService.recordRejection(routeId, rejectName); // Pass the correctly resolved routeId
+            } else {
+                log.warn("[RequestCountFilter] AnalyticsService (via ApplicationContextHolder) is null. Cannot record rejection for routeId: '{}'", routeId);
             }
         } catch (Exception e) {
-            log.warn("Could not record rejection in AnalyticsService: {}", e.getMessage());
+            log.warn("[RequestCountFilter] Could not record rejection in AnalyticsService (via ApplicationContextHolder): {}", e.getMessage());
         }
     }
 
@@ -193,7 +235,8 @@ public class RequestCountFilter implements WebFilter {
                 previousMinuteRejected += rejectedCount.get();
             }
         }
-
+        log.trace("[RequestCountFilter] MinuteMetrics: CurrentReq={}, PrevReq={}, CurrentRej={}, PrevRej={}",
+                currentMinuteSum, previousMinuteSum, currentMinuteRejected, previousMinuteRejected);
         return new MinuteMetrics(currentMinuteSum, previousMinuteSum, currentMinuteRejected, previousMinuteRejected);
     }
 

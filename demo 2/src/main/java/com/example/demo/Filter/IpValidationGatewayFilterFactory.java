@@ -89,6 +89,7 @@ public class IpValidationGatewayFilterFactory extends AbstractGatewayFilterFacto
             // Check if there are any allowed IPs for this route
             if (allowedIpsForRoute == null || allowedIpsForRoute.isEmpty()) {
                 log.error("No allowed IPs set for route ID={}. Returning 403.", matchingRoute.getId());
+                exchange.getAttributes().put("ipFilterRejection", true); // Attribute set
                 exchange.getResponse().setStatusCode(HttpStatus.FORBIDDEN);
                 return exchange.getResponse().setComplete();
             }
@@ -118,6 +119,7 @@ public class IpValidationGatewayFilterFactory extends AbstractGatewayFilterFacto
                 return chain.filter(exchange);
             } else {
                 log.warn("ACCESS DENIED for IP {} on route ID={}. IP not in allowed list.", clientIp, matchingRoute.getId());
+                exchange.getAttributes().put("ipFilterRejection", true); // Attribute set
                 exchange.getResponse().setStatusCode(HttpStatus.FORBIDDEN);
                 return exchange.getResponse().setComplete();
             }

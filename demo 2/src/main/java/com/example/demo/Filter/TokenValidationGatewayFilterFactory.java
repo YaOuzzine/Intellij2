@@ -123,6 +123,7 @@ public class TokenValidationGatewayFilterFactory extends AbstractGatewayFilterFa
 
                         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
                             log.warn("Missing or invalid Authorization header for path: {}", requestPath);
+                            exchange.getAttributes().put("tokenValidationRejection", true); // Attribute set
                             exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
                             return exchange.getResponse().setComplete();
                         }
@@ -138,6 +139,7 @@ public class TokenValidationGatewayFilterFactory extends AbstractGatewayFilterFa
                                 })
                                 .onErrorResume(e -> {
                                     log.warn("Token validation failed for path {}: {}", requestPath, e.getMessage());
+                                    exchange.getAttributes().put("tokenValidationRejection", true); // Attribute set
                                     exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
                                     return exchange.getResponse().setComplete();
                                 });
