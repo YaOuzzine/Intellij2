@@ -1,4 +1,3 @@
-// src/pages/AnalyticsPage.jsx
 import React, { useState, useEffect } from 'react';
 import {
     Typography,
@@ -27,7 +26,7 @@ import SpeedIcon from '@mui/icons-material/Speed';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import SyncButton from '../components/SyncButton';
-import axios from 'axios';
+import { api, apiClient } from '../services/api';
 
 // Animations
 const fadeIn = keyframes`
@@ -166,9 +165,9 @@ const AnalyticsPage = () => {
         try {
             // Fetch base metrics
             const [requestsResponse, minutelyResponse, routesResponse] = await Promise.all([
-                axios.get('/api/metrics/requests'),
-                axios.get('/api/metrics/minutely'),
-                axios.get('/api/gateway-routes')
+                apiClient.get('/metrics/requests'),
+                apiClient.get('/metrics/minutely'),
+                apiClient.get('/gateway-routes')
             ]);
 
             // Process routes for the dropdown
@@ -207,11 +206,11 @@ const AnalyticsPage = () => {
             });
 
             // Get time series data
-            const timeSeriesResponse = await axios.get(`/api/metrics/timeseries?timeRange=${timeRange}${selectedRoute !== 'all' ? `&routeId=${selectedRoute}` : ''}`);
+            const timeSeriesResponse = await apiClient.get(`/metrics/timeseries?timeRange=${timeRange}${selectedRoute !== 'all' ? `&routeId=${selectedRoute}` : ''}`);
             setTimeSeriesData(timeSeriesResponse.data.timeSeries);
 
             // Get rejection reasons
-            const rejectionsResponse = await axios.get('/api/metrics/rejections');
+            const rejectionsResponse = await apiClient.get('/metrics/rejections');
             const rejectionReasons = rejectionsResponse.data.rejectionReasons || {};
 
             // Convert to the format needed for the chart
@@ -223,7 +222,7 @@ const AnalyticsPage = () => {
             setRejectionData(formattedRejectionData);
 
             // Get route-specific metrics
-            const routeMetricsResponse = await axios.get('/api/metrics/routes');
+            const routeMetricsResponse = await apiClient.get('/metrics/routes');
             const routeMetrics = routeMetricsResponse.data;
 
             // Process route distribution data
