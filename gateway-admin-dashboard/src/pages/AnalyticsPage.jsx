@@ -96,7 +96,7 @@ const ChartContainer = styled(Paper)(({ theme }) => ({
     borderRadius: '16px',
     boxShadow: '0 8px 16px rgba(0, 0, 0, 0.1)',
     animation: `${fadeIn} 0.6s ease-out`,
-    minHeight: '500px', // Ensure consistent height for all charts
+    minHeight: '500px',
     display: 'flex',
     flexDirection: 'column',
 }));
@@ -239,30 +239,36 @@ const AnalyticsPage = () => {
         return () => clearInterval(interval);
     }, [timeRange, selectedRoute]);
 
+    // Build route parameter for API calls
+    const getRouteParam = () => {
+        return selectedRoute !== 'all' ? `?routeId=${selectedRoute}` : '';
+    };
+
     // Fetch all metrics data
     const fetchAllData = async (showLoading = true) => {
         if (showLoading) setLoading(true);
         setRefreshing(true);
 
         try {
-            // Fetch base metrics
+            // Build route parameter
+            const routeParam = selectedRoute !== 'all' ? `?routeId=${selectedRoute}` : '';
+
             const [requestsResponse, minutelyResponse, routesResponse] = await Promise.all([
-                apiClient.get('/metrics/requests'),
-                apiClient.get('/metrics/minutely'),
-                apiClient.get('/gateway-routes')
+                apiClient.get(`/metrics/requests${routeParam}`),      // ✅ Route filtered
+                apiClient.get(`/metrics/minutely${routeParam}`),      // ✅ Route filtered
+                apiClient.get('/gateway-routes') // Always get all routes for dropdown
             ]);
 
             // Process routes for the dropdown
             const fetchedAdminRoutes = routesResponse.data;
             const routeDataForDropdown = fetchedAdminRoutes.map(adminRoute => {
-                // Determine the string routeId as used by the AnalyticsService in 'demo 2'
-                // This matches how 'demo 2/Controller/MetricsController.java' (and DynamicRouteConfig) generates it
-                // adminRoute.routeId is the custom string ID from admin.gateway_routes. adminRoute.id is the PK.
-                const analyticsServiceRouteId = adminRoute.routeId && adminRoute.routeId.trim() !== '' ? adminRoute.routeId : `route-${adminRoute.id}`;
+                const analyticsServiceRouteId = adminRoute.routeId && adminRoute.routeId.trim() !== ''
+                    ? adminRoute.routeId
+                    : `route-${adminRoute.id}`;
                 return {
-                    id: adminRoute.id, // Original DB id from admin schema, useful for React keys
-                    label: adminRoute.predicates || analyticsServiceRouteId, // Display predicate or the string routeId
-                    value: analyticsServiceRouteId // This is the value to be sent to /api/metrics/timeseries
+                    id: adminRoute.id,
+                    label: adminRoute.predicates || analyticsServiceRouteId,
+                    value: analyticsServiceRouteId
                 };
             });
             setRoutes([{ id: 'all', label: 'All Routes', value: 'all' }, ...routeDataForDropdown]);
@@ -292,12 +298,12 @@ const AnalyticsPage = () => {
                 previousMinuteRejected: rejectedPreviousMinute,
             });
 
-            // Get time series data
+            // Get time series data with route filtering
             const timeSeriesResponse = await apiClient.get(`/metrics/timeseries?timeRange=${timeRange}${selectedRoute !== 'all' ? `&routeId=${selectedRoute}` : ''}`);
             setTimeSeriesData(timeSeriesResponse.data.timeSeries);
 
-            // Get rejection reasons
-            const rejectionsResponse = await apiClient.get('/metrics/rejections');
+            // Get rejection reasons with route filtering
+            const rejectionsResponse = await apiClient.get(`/metrics/rejections${routeParam}`);
             const rejectionReasons = rejectionsResponse.data.rejectionReasons || {};
 
             // Convert to the format needed for the chart
@@ -308,36 +314,50 @@ const AnalyticsPage = () => {
 
             setRejectionData(formattedRejectionData);
 
-            // Get route-specific metrics
+            // Get route-specific metrics (always all routes for this chart)
             const routeMetricsResponse = await apiClient.get('/metrics/routes');
             const routeMetrics = routeMetricsResponse.data;
 
             // Process route distribution data
-            const routeDistribution = routeMetrics.map(route => ({
+            let routeDistribution = routeMetrics.map(route => ({
                 id: route.id,
                 name: route.predicates || `Route ${route.id}`,
                 requests: route.requestCount,
                 rejected: route.rejectedCount,
                 avgResponseTime: route.avgResponseTime,
-                color: COLORS[route.id % COLORS.length] // Assign a consistent color
+                color: COLORS[route.id % COLORS.length]
             }));
+
+            // If a specific route is selected, highlight it or filter to show only that route
+            if (selectedRoute !== 'all') {
+                // Find the selected route and put it first, or show only that route
+                const selectedRouteData = routeDistribution.find(route => {
+                    const routeAnalyticsId = route.name.includes('Route ') ? `route-${route.id}` : route.name;
+                    return routeAnalyticsId === selectedRoute || route.name === selectedRoute;
+                });
+
+                if (selectedRouteData) {
+                    // Show only the selected route for focused view
+                    routeDistribution = [selectedRouteData];
+                }
+            }
 
             // Sort by number of requests
             routeDistribution.sort((a, b) => b.requests - a.requests);
             setRouteDistribution(routeDistribution);
 
-            // For response time data, we'll use the time series with avgResponseTime
+            // For response time data, use real data only (no fake fallbacks)
             const responseTimeData = timeSeriesResponse.data.timeSeries.map(point => ({
                 time: point.time,
-                avg: point.avgResponseTime || Math.round(50 + Math.random() * 100), // Fallback if not available
-                p95: point.p95ResponseTime || Math.round((point.avgResponseTime || 100) * 1.5) // Estimate p95 if not available
+                avg: point.avgResponseTime || 0,
+                p95: 0
             }));
 
             setResponseTimeData(responseTimeData);
 
         } catch (error) {
             console.error('Error fetching metrics:', error);
-            throw error; // Re-throw for the useEffect error handler
+            throw error;
         } finally {
             if (showLoading) setLoading(false);
             setRefreshing(false);
@@ -385,6 +405,13 @@ const AnalyticsPage = () => {
         overviewMetrics.previousMinuteRejected
     );
 
+    // Get display name for selected route
+    const getSelectedRouteDisplayName = () => {
+        if (selectedRoute === 'all') return 'All Routes';
+        const route = routes.find(r => r.value === selectedRoute);
+        return route ? route.label : selectedRoute;
+    };
+
     // If loading initially, show spinner
     if (loading) {
         return (
@@ -431,9 +458,16 @@ const AnalyticsPage = () => {
         <Box sx={{ p: 3, animation: `${fadeIn} 0.6s ease-out` }}>
             {/* Header */}
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4, flexWrap: 'wrap', gap: 2 }}>
-                <Typography variant="h4" component="h1" sx={{ fontWeight: 700, color: 'primary.main' }}>
-                    Traffic Analytics
-                </Typography>
+                <Box>
+                    <Typography variant="h4" component="h1" sx={{ fontWeight: 700, color: 'primary.main' }}>
+                        Traffic Analytics
+                    </Typography>
+                    {selectedRoute !== 'all' && (
+                        <Typography variant="subtitle1" color="text.secondary" sx={{ mt: 1 }}>
+                            Showing data for: <strong>{getSelectedRouteDisplayName()}</strong>
+                        </Typography>
+                    )}
+                </Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
                     {/* Time range selector */}
                     <Box sx={{ display: 'flex', alignItems: 'center' }}>
@@ -699,37 +733,50 @@ const AnalyticsPage = () => {
                     <Box sx={{ height: 400 }}>
                         <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
                             Traffic Over Time
+                            {selectedRoute !== 'all' && (
+                                <Typography component="span" variant="body2" color="text.secondary" sx={{ ml: 1 }}>
+                                    - {getSelectedRouteDisplayName()}
+                                </Typography>
+                            )}
                         </Typography>
-                        <ResponsiveContainer width="100%" height="100%">
-                            <AreaChart
-                                data={timeSeriesData}
-                                margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
-                            >
-                                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                                <XAxis dataKey="time" />
-                                <YAxis />
-                                <RechartsTooltip
-                                    formatter={(value, name) => [`${value} requests`, name === 'accepted' ? 'Accepted' : name === 'rejected' ? 'Rejected' : 'Total']}
-                                />
-                                <Legend />
-                                <Area
-                                    type="monotone"
-                                    dataKey="accepted"
-                                    stackId="1"
-                                    stroke="#00C49F"
-                                    fill="#00C49F"
-                                    name="Accepted"
-                                />
-                                <Area
-                                    type="monotone"
-                                    dataKey="rejected"
-                                    stackId="1"
-                                    stroke="#FF5252"
-                                    fill="#FF5252"
-                                    name="Rejected"
-                                />
-                            </AreaChart>
-                        </ResponsiveContainer>
+                        {timeSeriesData.length === 0 ? (
+                            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80%' }}>
+                                <Typography variant="body1" color="text.secondary">
+                                    No traffic data available for the selected time range
+                                </Typography>
+                            </Box>
+                        ) : (
+                            <ResponsiveContainer width="100%" height="100%">
+                                <AreaChart
+                                    data={timeSeriesData}
+                                    margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
+                                >
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                                    <XAxis dataKey="time" />
+                                    <YAxis />
+                                    <RechartsTooltip
+                                        formatter={(value, name) => [`${value} requests`, name === 'accepted' ? 'Accepted' : name === 'rejected' ? 'Rejected' : 'Total']}
+                                    />
+                                    <Legend />
+                                    <Area
+                                        type="monotone"
+                                        dataKey="accepted"
+                                        stackId="1"
+                                        stroke="#00C49F"
+                                        fill="#00C49F"
+                                        name="Accepted"
+                                    />
+                                    <Area
+                                        type="monotone"
+                                        dataKey="rejected"
+                                        stackId="1"
+                                        stroke="#FF5252"
+                                        fill="#FF5252"
+                                        name="Rejected"
+                                    />
+                                </AreaChart>
+                            </ResponsiveContainer>
+                        )}
                     </Box>
                 </TabPanel>
 
@@ -738,6 +785,11 @@ const AnalyticsPage = () => {
                     <Box sx={{ height: 400 }}>
                         <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
                             Rejection Reasons
+                            {selectedRoute !== 'all' && (
+                                <Typography component="span" variant="body2" color="text.secondary" sx={{ ml: 1 }}>
+                                    - {getSelectedRouteDisplayName()}
+                                </Typography>
+                            )}
                         </Typography>
                         {rejectionData.length === 0 ? (
                             <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80%' }}>
@@ -779,37 +831,41 @@ const AnalyticsPage = () => {
                     <Box sx={{ height: 400 }}>
                         <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
                             Response Time
+                            {selectedRoute !== 'all' && (
+                                <Typography component="span" variant="body2" color="text.secondary" sx={{ ml: 1 }}>
+                                    - {getSelectedRouteDisplayName()}
+                                </Typography>
+                            )}
                         </Typography>
-                        <ResponsiveContainer width="100%" height="100%">
-                            <LineChart
-                                data={responseTimeData}
-                                margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
-                            >
-                                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                                <XAxis dataKey="time" />
-                                <YAxis unit="ms" />
-                                <RechartsTooltip formatter={(value) => [`${value} ms`]} />
-                                <Legend />
-                                <Line
-                                    type="monotone"
-                                    dataKey="avg"
-                                    stroke="#0088FE"
-                                    name="Average"
-                                    strokeWidth={2}
-                                    dot={false}
-                                    activeDot={{ r: 8 }}
-                                />
-                                <Line
-                                    type="monotone"
-                                    dataKey="p95"
-                                    stroke="#FF914D"
-                                    name="95th Percentile"
-                                    strokeWidth={2}
-                                    dot={false}
-                                    activeDot={{ r: 8 }}
-                                />
-                            </LineChart>
-                        </ResponsiveContainer>
+                        {responseTimeData.every(point => point.avg === 0) ? (
+                            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80%' }}>
+                                <Typography variant="body1" color="text.secondary">
+                                    No response time data available
+                                </Typography>
+                            </Box>
+                        ) : (
+                            <ResponsiveContainer width="100%" height="100%">
+                                <LineChart
+                                    data={responseTimeData}
+                                    margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
+                                >
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                                    <XAxis dataKey="time" />
+                                    <YAxis unit="ms" />
+                                    <RechartsTooltip formatter={(value) => [`${value} ms`]} />
+                                    <Legend />
+                                    <Line
+                                        type="monotone"
+                                        dataKey="avg"
+                                        stroke="#0088FE"
+                                        name="Average"
+                                        strokeWidth={2}
+                                        dot={false}
+                                        activeDot={{ r: 8 }}
+                                    />
+                                </LineChart>
+                            </ResponsiveContainer>
+                        )}
                     </Box>
                 </TabPanel>
 
@@ -818,24 +874,37 @@ const AnalyticsPage = () => {
                     <Box sx={{ height: 400 }}>
                         <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
                             Traffic by Route
+                            {selectedRoute !== 'all' && (
+                                <Typography component="span" variant="body2" color="text.secondary" sx={{ ml: 1 }}>
+                                    - Filtered to {getSelectedRouteDisplayName()}
+                                </Typography>
+                            )}
                         </Typography>
-                        <ResponsiveContainer width="100%" height="100%">
-                            <BarChart
-                                data={routeDistribution}
-                                margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
-                                layout="vertical"
-                            >
-                                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                                <XAxis type="number" />
-                                <YAxis type="category" dataKey="name" width={150} />
-                                <RechartsTooltip formatter={(value) => [`${value} requests`]} />
-                                <Bar dataKey="requests" fill="#FF914D">
-                                    {routeDistribution.map((entry, index) => (
-                                        <Cell key={`cell-${index}`} fill={entry.color} />
-                                    ))}
-                                </Bar>
-                            </BarChart>
-                        </ResponsiveContainer>
+                        {routeDistribution.length === 0 || routeDistribution.every(route => route.requests === 0) ? (
+                            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80%' }}>
+                                <Typography variant="body1" color="text.secondary">
+                                    No traffic data available for routes
+                                </Typography>
+                            </Box>
+                        ) : (
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart
+                                    data={routeDistribution}
+                                    margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
+                                    layout="vertical"
+                                >
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                                    <XAxis type="number" />
+                                    <YAxis type="category" dataKey="name" width={150} />
+                                    <RechartsTooltip formatter={(value) => [`${value} requests`]} />
+                                    <Bar dataKey="requests" fill="#FF914D">
+                                        {routeDistribution.map((entry, index) => (
+                                            <Cell key={`cell-${index}`} fill={entry.color} />
+                                        ))}
+                                    </Bar>
+                                </BarChart>
+                            </ResponsiveContainer>
+                        )}
                     </Box>
                 </TabPanel>
             </ChartContainer>

@@ -21,7 +21,7 @@ import org.springframework.cloud.gateway.support.ServerWebExchangeUtils; // Adde
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
-@Order(1) // Ensure this filter runs early (if using Spring Security).
+@Order(1000) // CHANGED: Run much later to ensure gateway routing is complete
 @Component
 public class RequestCountFilter implements WebFilter {
 
@@ -58,32 +58,36 @@ public class RequestCountFilter implements WebFilter {
         // Track request start time for response time calculation
         long startTime = System.currentTimeMillis();
 
-        // --- OLD CODE for routeId determination ---
-        /*
-        // Extract the routeId from the exchange attributes if available
-        // Make it final to avoid the lambda capture issue
-        final String routeId = (String) exchange.getAttribute("routeId") != null ?
-                (String) exchange.getAttribute("routeId") : "unknown";
-        */
-        // --- END OF OLD CODE ---
-
-        // --- NEW CODE for routeId determination (THE FIX) ---
+        // --- IMPROVED CODE for routeId determination ---
         // Spring Cloud Gateway sets the matched Route object in the exchange attributes.
         Route gatewayRoute = exchange.getAttribute(ServerWebExchangeUtils.GATEWAY_ROUTE_ATTR);
 
         final String routeId;
         if (gatewayRoute != null) {
-            routeId = gatewayRoute.getId(); // This ID is set in DynamicRouteConfig (e.g., "route-1", "my-custom-id")
-            log.debug("[RequestCountFilter] Matched gateway route ID: '{}' for path: {}", routeId, path);
-            // Optionally, if other downstream filters specifically expect an attribute named "routeId":
-            // exchange.getAttributes().put("routeId", routeId); // Example: if another filter needs it by this specific key
+            routeId = gatewayRoute.getId(); // This ID is set in DynamicRouteConfig
+            log.info("[RequestCountFilter] ✅ Successfully matched gateway route ID: '{}' for path: {}", routeId, path);
+            log.info("[RequestCountFilter] ✅ Route URI: {}", gatewayRoute.getUri());
+            log.info("[RequestCountFilter] ✅ Route metadata: {}", gatewayRoute.getMetadata());
         } else {
-            // This case should ideally not happen for requests that are successfully routed by the gateway.
-            // It might occur for requests that don't match any defined gateway route (e.g. 404s not handled by a route).
-            routeId = "UNMATCHED_GATEWAY_REQUEST"; // A more descriptive fallback
-            log.warn("[RequestCountFilter] No GATEWAY_ROUTE_ATTR found in exchange for path: {}. Metrics will be recorded under '{}'", path, routeId);
+            // This indicates the request didn't match any gateway route, or we're running too early
+            routeId = "UNMATCHED_GATEWAY_REQUEST";
+            log.warn("[RequestCountFilter] ❌ No GATEWAY_ROUTE_ATTR found in exchange for path: {}. This might indicate:", path);
+            log.warn("[RequestCountFilter] 1. Request doesn't match any gateway route pattern");
+            log.warn("[RequestCountFilter] 2. Filter is running before gateway routing (check @Order)");
+            log.warn("[RequestCountFilter] 3. Gateway route configuration issue");
+            log.warn("[RequestCountFilter] 4. Request not going through gateway (wrong port?)");
+
+            // Debug: Log all exchange attributes to see what's available
+            log.warn("[RequestCountFilter] Available exchange attributes: {}", exchange.getAttributes().keySet());
+
+            // Debug: Log request details
+            log.warn("[RequestCountFilter] Request method: {}", exchange.getRequest().getMethod());
+            log.warn("[RequestCountFilter] Request path: {}", exchange.getRequest().getURI().getPath());
+            log.warn("[RequestCountFilter] Request host: {}", exchange.getRequest().getURI().getHost());
+            log.warn("[RequestCountFilter] Request port: {}", exchange.getRequest().getURI().getPort());
+            log.warn("[RequestCountFilter] Request headers: {}", exchange.getRequest().getHeaders().toSingleValueMap());
         }
-        // --- END OF NEW CODE ---
+        // --- END OF IMPROVED CODE ---
 
         // Always count this incoming request as accepted initially.
         log.debug("[RequestCountFilter] Counting request for path: {} with resolved routeId: '{}', currentSecond: {}", path, routeId, currentSecond);

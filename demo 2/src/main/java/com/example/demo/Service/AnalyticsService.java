@@ -2,12 +2,10 @@
 package com.example.demo.Service;
 
 import com.example.demo.Filter.RequestCountFilter;
-import com.example.demo.Repository.GatewayRouteRepository; // Added for sample data
 import com.fasterxml.jackson.core.JsonProcessingException; // Added for logging
 import com.fasterxml.jackson.databind.ObjectMapper; // Added for logging
 import org.slf4j.Logger; // Added for logging
 import org.slf4j.LoggerFactory; // Added for logging
-import org.springframework.beans.factory.annotation.Autowired; // Added for constructor injection
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -22,7 +20,7 @@ import java.util.stream.Collectors;
 @Service
 public class AnalyticsService {
 
-    private static final Logger log = LoggerFactory.getLogger(AnalyticsService.class); // Added logger
+    private static final Logger log = LoggerFactory.getLogger(AnalyticsService.class);
 
     // Stores request counts per route
     private final ConcurrentHashMap<String, AtomicLong> routeRequestCounter = new ConcurrentHashMap<>();
@@ -38,20 +36,14 @@ public class AnalyticsService {
     // Time series data for rejections (timestamp_minute_epoch -> map_of_routeId_to_count)
     private final ConcurrentHashMap<Long, Map<String, Long>> timeSeriesRejections = new ConcurrentHashMap<>();
 
-    // --- NEW: For improved sample data generation ---
-    private final GatewayRouteRepository gatewayRouteRepositoryForSampleData;
+    // Maximum number of historical records to keep per route
+    private static final int MAX_HISTORY_RECORDS = 60; // 60 minutes of data
+
     private final ObjectMapper objectMapper = new ObjectMapper(); // For logging complex objects
-    // --- END NEW ---
 
-    // --- MODIFIED: Constructor for injecting GatewayRouteRepository ---
-    @Autowired // Ensures Spring injects the repository
-    public AnalyticsService(GatewayRouteRepository gatewayRouteRepository) {
-        this.gatewayRouteRepositoryForSampleData = gatewayRouteRepository;
-        log.info("[AnalyticsService] Initialized. GatewayRouteRepository for sample data is {}.",
-                (this.gatewayRouteRepositoryForSampleData == null ? "NOT injected" : "injected"));
+    public AnalyticsService() {
+        log.info("[AnalyticsService] Initialized. Real data only - no sample data generation.");
     }
-    // --- END MODIFIED ---
-
 
     public void recordRequest(String routeId) {
         log.trace("[AnalyticsService] recordRequest called for routeId: '{}'", routeId);
@@ -107,38 +99,119 @@ public class AnalyticsService {
     }
 
     public Map<String, Long> getRejectionReasonBreakdown() {
-        // --- OLD CODE for sample rejection data ---
-        /*
-        if (rejectionReasonCounter.isEmpty()) {
-            long totalRejected = RequestCountFilter.getTotalRejectedCount();
-            if (totalRejected > 0) {
-                rejectionReasonCounter.put("IP Filter", new AtomicLong((long)(totalRejected * 0.4)));
-                rejectionReasonCounter.put("Token Validation", new AtomicLong((long)(totalRejected * 0.35)));
-                rejectionReasonCounter.put("Rate Limit", new AtomicLong((long)(totalRejected * 0.2)));
-                rejectionReasonCounter.put("Invalid Request", new AtomicLong((long)(totalRejected * 0.05)));
-            }
-        }
-        */
-        // --- END OLD CODE ---
-        // New logic: Return actual data. If it's empty, it's empty. Frontend can show "No data".
         Map<String, Long> reasons = rejectionReasonCounter.entrySet().stream()
                 .collect(Collectors.toMap(Map.Entry::getKey, entry -> entry.getValue().get()));
         if (reasons.isEmpty()) {
-            log.warn("[AnalyticsService] getRejectionReasonBreakdown: No actual rejection reasons recorded. Returning empty map.");
+            log.info("[AnalyticsService] getRejectionReasonBreakdown: No rejection reasons recorded. Returning empty map.");
         } else {
             log.debug("[AnalyticsService] getRejectionReasonBreakdown returning: {}", reasons);
         }
         return reasons;
     }
 
+    /**
+     * Get total request and rejection counts for a specific route
+     */
+    public Map<String, Long> getRouteSpecificCounts(String routeId) {
+        Map<String, Long> result = new HashMap<>();
+        long requests = routeRequestCounter.getOrDefault(routeId, new AtomicLong(0)).get();
+        long rejections = routeRejectionCounter.getOrDefault(routeId, new AtomicLong(0)).get();
+
+        result.put("requestCount", requests);
+        result.put("rejectedCount", rejections);
+
+        log.info("[AnalyticsService] getRouteSpecificCounts for routeId '{}': Requests={}, Rejections={}",
+                routeId, requests, rejections);
+
+        // DEBUG: Log all available route IDs in our counters
+        log.info("[AnalyticsService] Available route IDs in requestCounter: {}", routeRequestCounter.keySet());
+        log.info("[AnalyticsService] Available route IDs in rejectionCounter: {}", routeRejectionCounter.keySet());
+
+        // DEBUG: Check for similar route IDs (case-insensitive, whitespace)
+        String normalizedSearchId = routeId.trim().toLowerCase();
+        log.info("[AnalyticsService] Searching for normalized routeId: '{}'", normalizedSearchId);
+
+        for (String availableRouteId : routeRequestCounter.keySet()) {
+            String normalizedAvailable = availableRouteId.trim().toLowerCase();
+            log.info("[AnalyticsService] Comparing with available routeId: '{}' (normalized: '{}')",
+                    availableRouteId, normalizedAvailable);
+            if (normalizedAvailable.equals(normalizedSearchId)) {
+                log.info("[AnalyticsService] Found case/whitespace mismatch! Requested: '{}', Available: '{}'",
+                        routeId, availableRouteId);
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Get minute-level metrics for a specific route
+     */
+    public Map<String, Long> getRouteSpecificMinuteMetrics(String routeId) {
+        long now = System.currentTimeMillis();
+        long currentMinuteEpoch = now / 60000;
+        long previousMinuteEpoch = currentMinuteEpoch - 1;
+
+        Map<String, Long> currentMinuteRequests = timeSeriesRequests.getOrDefault(currentMinuteEpoch, Collections.emptyMap());
+        Map<String, Long> previousMinuteRequests = timeSeriesRequests.getOrDefault(previousMinuteEpoch, Collections.emptyMap());
+        Map<String, Long> currentMinuteRejections = timeSeriesRejections.getOrDefault(currentMinuteEpoch, Collections.emptyMap());
+        Map<String, Long> previousMinuteRejections = timeSeriesRejections.getOrDefault(previousMinuteEpoch, Collections.emptyMap());
+
+        long currentReq = currentMinuteRequests.getOrDefault(routeId, 0L);
+        long previousReq = previousMinuteRequests.getOrDefault(routeId, 0L);
+        long currentRej = currentMinuteRejections.getOrDefault(routeId, 0L);
+        long previousRej = previousMinuteRejections.getOrDefault(routeId, 0L);
+
+        Map<String, Long> result = new HashMap<>();
+        result.put("requestsCurrentMinute", currentReq);
+        result.put("requestsPreviousMinute", previousReq);
+        result.put("rejectedCurrentMinute", currentRej);
+        result.put("rejectedPreviousMinute", previousRej);
+
+        log.debug("[AnalyticsService] getRouteSpecificMinuteMetrics for routeId '{}': CurrentReq={}, PrevReq={}, CurrentRej={}, PrevRej={}",
+                routeId, currentReq, previousReq, currentRej, previousRej);
+        return result;
+    }
+
+    /**
+     * Get rejection reasons breakdown for a specific route
+     * Note: Since rejection reasons are stored globally, we need to implement route-specific tracking
+     * For now, this returns the global breakdown but could be enhanced to track per-route rejection reasons
+     */
+    public Map<String, Long> getRouteSpecificRejectionReasons(String routeId) {
+        // TODO: Implement per-route rejection reason tracking if needed
+        // For now, we'll return proportional data based on route's rejection percentage
+        long routeRejections = routeRejectionCounter.getOrDefault(routeId, new AtomicLong(0)).get();
+        long totalRejections = routeRejectionCounter.values().stream().mapToLong(AtomicLong::get).sum();
+
+        if (routeRejections == 0 || totalRejections == 0) {
+            log.debug("[AnalyticsService] getRouteSpecificRejectionReasons for routeId '{}': No rejections found", routeId);
+            return Collections.emptyMap();
+        }
+
+        // Calculate route's proportion of total rejections
+        double routeProportion = (double) routeRejections / totalRejections;
+
+        Map<String, Long> globalReasons = getRejectionReasonBreakdown();
+        Map<String, Long> routeSpecificReasons = new HashMap<>();
+
+        globalReasons.forEach((reason, count) -> {
+            long routeReasonCount = Math.round(count * routeProportion);
+            if (routeReasonCount > 0) {
+                routeSpecificReasons.put(reason, routeReasonCount);
+            }
+        });
+
+        log.debug("[AnalyticsService] getRouteSpecificRejectionReasons for routeId '{}': {} reasons with total {} rejections",
+                routeId, routeSpecificReasons.size(), routeRejections);
+        return routeSpecificReasons;
+    }
+
     public double getAverageResponseTime(String routeId) {
         List<Long> times = routeResponseTimes.get(routeId);
         if (times == null || times.isEmpty()) {
-            // --- OLD CODE for sample response time ---
-            // return 50 + Math.random() * 200;
-            // --- END OLD CODE ---
-            log.warn("[AnalyticsService] getAverageResponseTime: No response times recorded for routeId: '{}'. Returning 0.", routeId);
-            return 0.0; // Return 0 if no data, or handle as appropriate
+            log.debug("[AnalyticsService] getAverageResponseTime: No response times recorded for routeId: '{}'. Returning 0.", routeId);
+            return 0.0; // Return 0 if no data
         }
 
         double average;
@@ -154,20 +227,20 @@ public class AnalyticsService {
         List<Map<String, Object>> result = new ArrayList<>();
         long nowMinuteEpoch = System.currentTimeMillis() / 60000;
 
-        // --- MODIFIED: Sample data population logic ---
+        // Log current data state for debugging
         if (timeSeriesRequests.isEmpty() && timeSeriesRejections.isEmpty()) {
-            log.warn("[AnalyticsService] No actual time series data found in timeSeriesRequests/Rejections. Populating with sample data. Requested routeId: '{}'", requestedRouteId);
-            populateSampleTimeSeriesData();
+            log.info("[AnalyticsService] No time series data available. Returning empty result.");
         } else if (log.isDebugEnabled()) {
             // Log a small part of the stored data to verify keys if not empty
             timeSeriesRequests.entrySet().stream().findFirst().ifPresent(entry -> {
                 try {
                     log.debug("[AnalyticsService] Current keys in timeSeriesRequests for first available timestamp {}: {}",
                             entry.getKey(), objectMapper.writeValueAsString(entry.getValue().keySet()));
-                } catch (JsonProcessingException e) { log.warn("Error logging timeSeriesRequests keys"); }
+                } catch (JsonProcessingException e) {
+                    log.warn("Error logging timeSeriesRequests keys");
+                }
             });
         }
-        // --- END MODIFIED ---
 
         DateTimeFormatter formatter;
         if (minutes <= 60) formatter = DateTimeFormatter.ofPattern("HH:mm");
@@ -197,9 +270,7 @@ public class AnalyticsService {
                     point.put("requests", reqCount);
                     point.put("rejected", rejCount);
                     point.put("accepted", Math.max(0, reqCount - rejCount));
-                    // For avgResponseTime, you'd typically calculate it based on stored sums and counts for that minute,
-                    // or fetch pre-aggregated minute-level avg response times if you store them.
-                    // Here, we'll just use the overall average for simplicity in this example.
+                    // Get actual average response time for this route
                     point.put("avgResponseTime", getAverageResponseTime(requestedRouteId));
                     log.debug("[AnalyticsService] Data for specific routeId '{}' at {}: Requests={}, Rejected={}, Accepted={}",
                             requestedRouteId, point.get("time"), reqCount, rejCount, point.get("accepted"));
@@ -211,10 +282,10 @@ public class AnalyticsService {
                     point.put("requests", totalRequests);
                     point.put("rejected", totalRejections);
                     point.put("accepted", Math.max(0, totalRequests - totalRejections));
-                    // For "all" routes, avgResponseTime could be an average of averages, or a global average.
-                    // Here, we'll calculate average of all known route averages for simplicity.
+                    // For "all" routes, calculate weighted average of response times
                     double avgAllResponseTime = routeResponseTimes.keySet().stream()
                             .mapToDouble(this::getAverageResponseTime)
+                            .filter(time -> time > 0) // Only include routes with actual data
                             .average().orElse(0.0);
                     point.put("avgResponseTime", avgAllResponseTime);
                     log.debug("[AnalyticsService] Data for 'all' routes at {}: Requests={}, Rejected={}, Accepted={}",
@@ -226,104 +297,6 @@ public class AnalyticsService {
         log.info("[AnalyticsService] getTimeSeriesData returning {} points for requestedRouteId: '{}'", result.size(), requestedRouteId);
         return result;
     }
-
-    // --- MODIFIED: populateSampleTimeSeriesData to use actual route IDs ---
-    private void populateSampleTimeSeriesData() {
-        log.info("[AnalyticsService] populateSampleTimeSeriesData called.");
-        long nowMinuteEpoch = System.currentTimeMillis() / 60000;
-        Random random = new Random();
-
-        List<com.example.demo.Entity.GatewayRoute> actualGatewayRoutes = Collections.emptyList();
-        if (this.gatewayRouteRepositoryForSampleData != null) {
-            try {
-                // Fetching from the gateway schema's repository instance
-                actualGatewayRoutes = this.gatewayRouteRepositoryForSampleData.findAllWithAllowedIpsAndRateLimit();
-                log.info("[AnalyticsService] Fetched {} actual routes from gateway schema for sample data generation.", actualGatewayRoutes.size());
-            } catch (Exception e) {
-                log.error("[AnalyticsService] Could not fetch actual routes from gateway schema for sample data: {}. Falling back to dummies.", e.getMessage(), e);
-            }
-        } else {
-            log.warn("[AnalyticsService] GatewayRouteRepository (for sample data) is null. Using dummy routes for sample data.");
-        }
-
-        List<String> effectiveRouteIdsForSample = new ArrayList<>();
-        if (!actualGatewayRoutes.isEmpty()) {
-            for (com.example.demo.Entity.GatewayRoute route : actualGatewayRoutes) {
-                String id = route.getRouteId() != null && !route.getRouteId().isBlank()
-                        ? route.getRouteId()
-                        : "route-" + route.getId(); // route.getId() is PK from gateway.gateway_routes
-                effectiveRouteIdsForSample.add(id);
-            }
-        } else {
-            log.warn("[AnalyticsService] No actual routes found or repo unavailable, using dummy route IDs for sample data.");
-            effectiveRouteIdsForSample.add("sample-route-1"); // Fallback dummy ID
-            effectiveRouteIdsForSample.add("sample-route-2"); // Fallback dummy ID
-        }
-        log.info("[AnalyticsService] Using effective route IDs for sample data: {}", effectiveRouteIdsForSample);
-
-
-        RequestCountFilter.MinuteMetrics currentMetrics = RequestCountFilter.getMinuteMetrics();
-        long baseCurrentRequests = currentMetrics.getRequestsCurrentMinute() > 0 ? currentMetrics.getRequestsCurrentMinute() : 50;
-        long baseCurrentRejected = currentMetrics.getRejectedCurrentMinute() > 0 ? currentMetrics.getRejectedCurrentMinute() : 5;
-
-        for (int i = 0; i < 1440; i++) { // 24 hours of data
-            long timestamp = nowMinuteEpoch - i;
-            double timeFactor = Math.max(0.2, 1.0 - (i / 2000.0)); // Gradual decline, minimum 20%
-
-            long totalRequestValueForTimestamp = (long) (baseCurrentRequests * timeFactor * (0.7 + random.nextDouble() * 0.6)); // Fluctuation
-            long totalRejectedValueForTimestamp = (long) (baseCurrentRejected * timeFactor * (0.5 + random.nextDouble() * 1.0));
-            totalRejectedValueForTimestamp = Math.min(totalRejectedValueForTimestamp, totalRequestValueForTimestamp); // Rejections can't exceed requests
-
-            Map<String, Long> routeRequestsAtTimestamp = new HashMap<>();
-            Map<String, Long> routeRejectionsAtTimestamp = new HashMap<>();
-
-            if (!effectiveRouteIdsForSample.isEmpty()) {
-                long remainingRequests = totalRequestValueForTimestamp;
-                long remainingRejections = totalRejectedValueForTimestamp;
-
-                for (int j = 0; j < effectiveRouteIdsForSample.size(); j++) {
-                    String currentSampleRouteId = effectiveRouteIdsForSample.get(j);
-
-                    long reqShare, rejShare;
-                    if (j == effectiveRouteIdsForSample.size() - 1) { // Last route gets the remainder
-                        reqShare = remainingRequests;
-                        rejShare = remainingRejections;
-                    } else {
-                        // Distribute somewhat proportionally, with randomness
-                        double proportion = 1.0 / effectiveRouteIdsForSample.size();
-                        reqShare = (long) (totalRequestValueForTimestamp * proportion * (0.5 + random.nextDouble()));
-                        rejShare = (long) (totalRejectedValueForTimestamp * proportion * (0.5 + random.nextDouble()));
-
-                        reqShare = Math.max(0, Math.min(reqShare, remainingRequests));
-                        rejShare = Math.max(0, Math.min(rejShare, remainingRejections));
-                        rejShare = Math.min(rejShare, reqShare); // Rejections for this route part <= requests for this route part
-                    }
-                    routeRequestsAtTimestamp.put(currentSampleRouteId, reqShare);
-                    routeRejectionsAtTimestamp.put(currentSampleRouteId, rejShare);
-                    remainingRequests -= reqShare;
-                    remainingRejections -= rejShare;
-                }
-            } else { // Should not happen if fallback dummy IDs are used
-                routeRequestsAtTimestamp.put("fallback_sample_route", totalRequestValueForTimestamp);
-                routeRejectionsAtTimestamp.put("fallback_sample_route", totalRejectedValueForTimestamp);
-            }
-
-            if (i == 0 && log.isDebugEnabled()) { // Log for the most recent sample timestamp only
-                try {
-                    log.debug("[AnalyticsService] Sample data generated for timestampEpoch {}. Route requests distribution: {}",
-                            timestamp, objectMapper.writeValueAsString(routeRequestsAtTimestamp));
-                    log.debug("[AnalyticsService] Sample data generated for timestampEpoch {}. Route rejections distribution: {}",
-                            timestamp, objectMapper.writeValueAsString(routeRejectionsAtTimestamp));
-                } catch (JsonProcessingException e) {
-                    log.warn("[AnalyticsService] Error serializing sample route data for logging", e);
-                }
-            }
-            timeSeriesRequests.put(timestamp, routeRequestsAtTimestamp);
-            timeSeriesRejections.put(timestamp, routeRejectionsAtTimestamp);
-        }
-        log.info("[AnalyticsService] Finished populating sample data for {} timestamps.", timeSeriesRequests.size());
-    }
-    // --- END MODIFIED ---
 
     public void cleanupOldData() {
         long cutoffMinuteEpoch = (System.currentTimeMillis() / 60000) - (7 * 24 * 60); // 7 days ago

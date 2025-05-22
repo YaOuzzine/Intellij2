@@ -23,13 +23,23 @@ public class MetricsController {
         this.analyticsService = analyticsService;
     }
 
-    // Endpoint for total request counts.
+    // Endpoint for total request counts with optional route filtering.
     @GetMapping("/api/metrics/requests")
-    public RequestCountResponse getTotalRequests() {
-        return new RequestCountResponse(
-                RequestCountFilter.getTotalRequestCount(),
-                RequestCountFilter.getTotalRejectedCount()
-        );
+    public RequestCountResponse getTotalRequests(@RequestParam(value = "routeId", required = false) String routeId) {
+        if (routeId != null && !routeId.equalsIgnoreCase("all")) {
+            // Return route-specific counts
+            Map<String, Long> routeCounts = analyticsService.getRouteSpecificCounts(routeId);
+            return new RequestCountResponse(
+                    routeCounts.get("requestCount"),
+                    routeCounts.get("rejectedCount")
+            );
+        } else {
+            // Return global counts (existing behavior)
+            return new RequestCountResponse(
+                    RequestCountFilter.getTotalRequestCount(),
+                    RequestCountFilter.getTotalRejectedCount()
+            );
+        }
     }
 
     // DTO for total request counts.
@@ -51,16 +61,28 @@ public class MetricsController {
         }
     }
 
-    // Endpoint to expose per-minute metrics.
+    // Endpoint to expose per-minute metrics with optional route filtering.
     @GetMapping("/api/metrics/minutely")
-    public MinuteMetricsResponse getMinutelyMetrics() {
-        RequestCountFilter.MinuteMetrics metrics = RequestCountFilter.getMinuteMetrics();
-        return new MinuteMetricsResponse(
-                metrics.getRequestsCurrentMinute(),
-                metrics.getRequestsPreviousMinute(),
-                metrics.getRejectedCurrentMinute(),
-                metrics.getRejectedPreviousMinute()
-        );
+    public MinuteMetricsResponse getMinutelyMetrics(@RequestParam(value = "routeId", required = false) String routeId) {
+        if (routeId != null && !routeId.equalsIgnoreCase("all")) {
+            // Return route-specific minute metrics
+            Map<String, Long> routeMinuteMetrics = analyticsService.getRouteSpecificMinuteMetrics(routeId);
+            return new MinuteMetricsResponse(
+                    routeMinuteMetrics.get("requestsCurrentMinute"),
+                    routeMinuteMetrics.get("requestsPreviousMinute"),
+                    routeMinuteMetrics.get("rejectedCurrentMinute"),
+                    routeMinuteMetrics.get("rejectedPreviousMinute")
+            );
+        } else {
+            // Return global minute metrics (existing behavior)
+            RequestCountFilter.MinuteMetrics metrics = RequestCountFilter.getMinuteMetrics();
+            return new MinuteMetricsResponse(
+                    metrics.getRequestsCurrentMinute(),
+                    metrics.getRequestsPreviousMinute(),
+                    metrics.getRejectedCurrentMinute(),
+                    metrics.getRejectedPreviousMinute()
+            );
+        }
     }
 
     // DTO for per-minute metrics.
@@ -162,10 +184,19 @@ public class MetricsController {
         }
     }
 
-    // New endpoint for rejection reasons analytics
+    // New endpoint for rejection reasons analytics with optional route filtering
     @GetMapping("/api/metrics/rejections")
-    public RejectionBreakdownResponse getRejectionBreakdown() {
-        Map<String, Long> breakdownMap = analyticsService.getRejectionReasonBreakdown();
+    public RejectionBreakdownResponse getRejectionBreakdown(@RequestParam(value = "routeId", required = false) String routeId) {
+        Map<String, Long> breakdownMap;
+
+        if (routeId != null && !routeId.equalsIgnoreCase("all")) {
+            // Return route-specific rejection reasons
+            breakdownMap = analyticsService.getRouteSpecificRejectionReasons(routeId);
+        } else {
+            // Return global rejection reasons (existing behavior)
+            breakdownMap = analyticsService.getRejectionReasonBreakdown();
+        }
+
         return new RejectionBreakdownResponse(breakdownMap);
     }
 
