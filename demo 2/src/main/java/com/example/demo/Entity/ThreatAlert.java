@@ -1,6 +1,8 @@
 package com.example.demo.Entity;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import java.time.LocalDateTime;
 
 @Entity
@@ -59,7 +61,8 @@ public class ThreatAlert {
     @Column(name = "related_pattern_id")
     private Long relatedPatternId;
 
-    @Column(name = "metadata", columnDefinition = "JSONB")
+    @Column(name = "metadata")
+    @JdbcTypeCode(SqlTypes.JSON)
     private String metadata;
 
     @Column(name = "created_at", nullable = false)

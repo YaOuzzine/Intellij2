@@ -1,5 +1,5 @@
-// src/pages/AnalyticsPage.jsx
-import React, { useState, useEffect } from 'react';
+// src/pages/AnalyticsPage.jsx - Enhanced AI-Powered Security Analytics Dashboard
+import React, { useState, useEffect, useCallback } from 'react';
 import {
     Typography,
     Box,
@@ -22,7 +22,15 @@ import {
     useTheme,
     useMediaQuery,
     Alert,
-    AlertTitle
+    AlertTitle,
+    Chip,
+    LinearProgress,
+    IconButton,
+    Dialog,
+    DialogTitle,
+    DialogContent,
+    DialogActions,
+    Badge
 } from '@mui/material';
 import { styled, alpha, keyframes } from '@mui/material/styles';
 import {
@@ -40,11 +48,15 @@ import {
     CartesianGrid,
     Tooltip as RechartsTooltip,
     Legend,
-    ResponsiveContainer
+    ResponsiveContainer,
+    RadialBarChart,
+    RadialBar,
+    Treemap,
+    ScatterChart,
+    Scatter
 } from 'recharts';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import DateRangeIcon from '@mui/icons-material/DateRange';
-import NetworkCheckIcon from '@mui/icons-material/NetworkCheck';
 import SecurityIcon from '@mui/icons-material/Security';
 import SpeedIcon from '@mui/icons-material/Speed';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
@@ -53,8 +65,17 @@ import InsightsIcon from '@mui/icons-material/Insights';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import PieChartIcon from '@mui/icons-material/PieChart';
 import BarChartIcon from '@mui/icons-material/BarChart';
-import SyncButton from '../components/SyncButton';
-import { apiClient } from '../services/api';
+import WarningIcon from '@mui/icons-material/Warning';
+import SmartToyIcon from '@mui/icons-material/SmartToy';
+import TrendingUpIcon from '@mui/icons-material/TrendingUp';
+import TrendingDownIcon from '@mui/icons-material/TrendingDown';
+import FiberManualRecordIcon from '@mui/icons-material/FiberManualRecord';
+import VerifiedUserIcon from '@mui/icons-material/VerifiedUser';
+import BugReportIcon from '@mui/icons-material/BugReport';
+import ShieldIcon from '@mui/icons-material/Shield';
+import GavelIcon from '@mui/icons-material/Gavel';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import apiClient from '../apiClient';
 
 // Animations
 const fadeIn = keyframes`
@@ -68,98 +89,128 @@ const pulse = keyframes`
     100% { box-shadow: 0 0 0 0 rgba(255, 145, 77, 0); }
 `;
 
-// Styled components
+const aiGlow = keyframes`
+    0%, 100% { box-shadow: 0 0 20px rgba(138, 43, 226, 0.3); }
+    50% { box-shadow: 0 0 30px rgba(138, 43, 226, 0.6); }
+`;
+
+// Styled Components
 const StyledCard = styled(Card)(({ theme }) => ({
     borderRadius: '16px',
-    boxShadow: '0 8px 16px rgba(0, 0, 0, 0.1)',
+    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
     height: '100%',
     transition: 'all 0.3s ease',
     overflow: 'hidden',
+    animation: `${fadeIn} 0.6s ease-out`,
     '&:hover': {
         transform: 'translateY(-5px)',
-        boxShadow: '0 12px 24px rgba(0, 0, 0, 0.15)',
+        boxShadow: '0 12px 40px rgba(0, 0, 0, 0.15)',
     },
 }));
 
-const MetricTitle = styled(Typography)(({ theme }) => ({
-    fontWeight: 500,
-    color: theme.palette.text.secondary,
-    marginBottom: theme.spacing(1),
+const AICard = styled(Card)(({ theme }) => ({
+    borderRadius: '16px',
+    background: 'linear-gradient(135deg, rgba(138, 43, 226, 0.1) 0%, rgba(75, 0, 130, 0.1) 100%)',
+    border: '1px solid rgba(138, 43, 226, 0.2)',
+    animation: `${aiGlow} 3s ease-in-out infinite`,
+    '&:hover': {
+        animation: `${aiGlow} 1s ease-in-out infinite`,
+    },
 }));
 
-const MetricValue = styled(Typography)(({ theme }) => ({
-    fontSize: '2rem',
-    fontWeight: 700,
-    color: theme.palette.primary.main,
-}));
+const ThreatCard = styled(Card)(({ severity }) => {
+    const colors = {
+        CRITICAL: '#d32f2f',
+        HIGH: '#f57c00',
+        MEDIUM: '#fbc02d',
+        LOW: '#388e3c'
+    };
 
-const ChartContainer = styled(Paper)(({ theme }) => ({
+    return {
+        borderRadius: '12px',
+        borderLeft: `4px solid ${colors[severity] || colors.LOW}`,
+        background: `linear-gradient(135deg, ${alpha(colors[severity] || colors.LOW, 0.05)} 0%, transparent 100%)`,
+        transition: 'all 0.3s ease',
+        '&:hover': {
+            transform: 'translateX(5px)',
+            boxShadow: `0 4px 20px ${alpha(colors[severity] || colors.LOW, 0.3)}`,
+        },
+    };
+});
+
+const MetricCard = styled(Paper)(({ theme, color = '#1976d2' }) => ({
     padding: theme.spacing(3),
     borderRadius: '16px',
-    boxShadow: '0 8px 16px rgba(0, 0, 0, 0.1)',
-    animation: `${fadeIn} 0.6s ease-out`,
-    minHeight: '500px',
-    display: 'flex',
-    flexDirection: 'column',
-}));
-
-const RefreshButton = styled(Button)(({ theme }) => ({
-    borderRadius: '8px',
-    minWidth: 'auto',
-    padding: theme.spacing(1),
-}));
-
-const TimeRangeToggle = styled(ToggleButtonGroup)(({ theme }) => ({
-    '& .MuiToggleButton-root': {
-        borderRadius: 20,
-        margin: theme.spacing(0, 0.5),
-        padding: theme.spacing(0.5, 1.5),
-        textTransform: 'none',
-        fontWeight: 500,
-        fontSize: '0.875rem',
-        border: `1px solid ${alpha(theme.palette.primary.main, 0.2)}`,
-        '&.Mui-selected': {
-            backgroundColor: alpha(theme.palette.primary.main, 0.1),
-            color: theme.palette.primary.main,
-            fontWeight: 600,
-        },
+    background: `linear-gradient(135deg, ${alpha(color, 0.1)} 0%, ${alpha(color, 0.05)} 100%)`,
+    border: `1px solid ${alpha(color, 0.2)}`,
+    position: 'relative',
+    overflow: 'hidden',
+    '&::before': {
+        content: '""',
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        height: '4px',
+        background: color,
     },
 }));
 
-const StyledTabs = styled(Tabs)(({ theme }) => ({
-    marginBottom: theme.spacing(3),
-    '& .MuiTab-root': {
-        minWidth: 'auto',
-        padding: theme.spacing(1.5, 2),
-        textTransform: 'none',
-        fontWeight: 500,
-        borderRadius: '8px 8px 0 0',
+const HealthScoreCard = styled(Paper)(({ theme, score }) => {
+    const getColor = (score) => {
+        if (score >= 90) return '#4caf50';
+        if (score >= 70) return '#ff9800';
+        if (score >= 50) return '#f44336';
+        return '#9c27b0';
+    };
+
+    return {
+        padding: theme.spacing(3),
+        borderRadius: '20px',
+        background: `linear-gradient(135deg, ${alpha(getColor(score), 0.1)} 0%, ${alpha(getColor(score), 0.05)} 100%)`,
+        border: `2px solid ${alpha(getColor(score), 0.3)}`,
+        textAlign: 'center',
+        position: 'relative',
+        overflow: 'hidden',
+    };
+});
+
+const TimelineItem = styled(Box)(({ theme, severity }) => {
+    const colors = {
+        CRITICAL: '#d32f2f',
+        HIGH: '#f57c00',
+        MEDIUM: '#fbc02d',
+        LOW: '#388e3c'
+    };
+
+    return {
+        display: 'flex',
+        alignItems: 'center',
+        padding: theme.spacing(1.5),
+        marginBottom: theme.spacing(1),
+        borderRadius: '8px',
+        background: alpha(colors[severity] || colors.LOW, 0.05),
+        border: `1px solid ${alpha(colors[severity] || colors.LOW, 0.1)}`,
         transition: 'all 0.2s ease',
-        '&.Mui-selected': {
-            fontWeight: 700,
-            color: theme.palette.primary.main,
+        '&:hover': {
+            background: alpha(colors[severity] || colors.LOW, 0.1),
+            transform: 'translateX(5px)',
         },
-    },
-    '& .MuiTabs-indicator': {
-        height: 3,
-        borderRadius: '3px 3px 0 0',
-    },
-}));
+    };
+});
 
-// Chart colors
-const COLORS = ['#FF914D', '#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#A569BD'];
-const REJECTION_COLORS = {
-    'IP Filter': '#9528eb',
-    'Token Validation': '#FF9800',
-    'Rate Limit': '#F44336',
-    'Invalid Request': '#9C27B0',
-    'Other': '#795548'
+// Chart Colors
+const COLORS = ['#FF914D', '#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#A569BD', '#8884d8'];
+const THREAT_COLORS = {
+    'CRITICAL': '#d32f2f',
+    'HIGH': '#f57c00',
+    'MEDIUM': '#fbc02d',
+    'LOW': '#388e3c'
 };
 
-// Tab panel component
+// Tab Panel Component
 function TabPanel(props) {
     const { children, value, index, ...other } = props;
-
     return (
         <div
             role="tabpanel"
@@ -181,734 +232,881 @@ function TabPanel(props) {
 const AnalyticsPage = () => {
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-    const isTablet = useMediaQuery(theme.breakpoints.down('lg'));
 
-    // State for tab selection
+    // State management
     const [tabValue, setTabValue] = useState(0);
-
-    // State for analytics data
-    const [dashboardData, setDashboardData] = useState(null);
-    const [displayMetrics, setDisplayMetrics] = useState({
-        totalRequests: 0,
-        totalRejected: 0,
-        acceptanceRate: 0,
-        currentMinuteRequests: 0,
-        previousMinuteRequests: 0,
-        currentMinuteRejected: 0,
-        previousMinuteRejected: 0,
-    });
-
-    // Time series and chart data
-    const [timeSeriesData, setTimeSeriesData] = useState([]);
-    const [rejectionData, setRejectionData] = useState([]);
-    const [routeDistribution, setRouteDistribution] = useState([]);
-    const [responseTimeData, setResponseTimeData] = useState([]);
-
-    // State for filters and controls
-    const [timeRange, setTimeRange] = useState('1h');
-    const [selectedRoute, setSelectedRoute] = useState('all');
-    const [routes, setRoutes] = useState([]);
-
-    // Loading and error states
+    const [timeRange, setTimeRange] = useState('24h');
     const [loading, setLoading] = useState(true);
-    const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState(null);
+    const [refreshing, setRefreshing] = useState(false);
+
+    // Data state
+    const [dashboardData, setDashboardData] = useState({});
+    const [aiInsights, setAiInsights] = useState({});
+    const [threatIntelligence, setThreatIntelligence] = useState({});
+    const [activeAlerts, setActiveAlerts] = useState([]);
+    const [complianceData, setComplianceData] = useState({});
+    const [threatLandscape, setThreatLandscape] = useState({});
+
+    // Dialog state
+    const [alertDetailDialog, setAlertDetailDialog] = useState({ open: false, alert: null });
+    const [insightDetailDialog, setInsightDetailDialog] = useState({ open: false, insight: null });
+
+    // Fetch all analytics data
+    const fetchAnalyticsData = useCallback(async (showLoading = true) => {
+        if (showLoading) setLoading(true);
+        setRefreshing(true);
+        setError(null);
+
+        try {
+            console.log('[Enhanced Analytics] Fetching comprehensive analytics data...');
+
+            // Fetch all data in parallel for better performance
+            const [
+                dashboardResponse,
+                aiInsightsResponse,
+                threatIntelResponse,
+                alertsResponse,
+                complianceResponse,
+                threatLandscapeResponse
+            ] = await Promise.all([
+                apiClient.get('/analytics/dashboard'),
+                apiClient.get('/analytics/ai/security-insights'),
+                apiClient.get('/analytics/threat-intelligence/realtime'),
+                apiClient.get('/analytics/alerts/active'),
+                apiClient.get('/analytics/compliance/dashboard'),
+                apiClient.get('/analytics/threat-analysis/landscape')
+            ]);
+
+            // Update state with fetched data
+            setDashboardData(dashboardResponse.data);
+            setAiInsights(aiInsightsResponse.data);
+            setThreatIntelligence(threatIntelResponse.data);
+            setActiveAlerts(alertsResponse.data);
+            setComplianceData(complianceResponse.data);
+            setThreatLandscape(threatLandscapeResponse.data);
+
+            console.log('[Enhanced Analytics] All data loaded successfully');
+
+        } catch (error) {
+            console.error('[Enhanced Analytics] Error fetching data:', error);
+            if (error.response?.status === 401) {
+                setError("Authentication error. Please log in again.");
+            } else {
+                setError("Failed to load analytics data. Please try again later.");
+            }
+        } finally {
+            if (showLoading) setLoading(false);
+            setRefreshing(false);
+        }
+    }, []);
+
+    // Initial data load and auto-refresh
+    useEffect(() => {
+        fetchAnalyticsData();
+
+        // Set up real-time updates every 30 seconds
+        const interval = setInterval(() => {
+            fetchAnalyticsData(false);
+        }, 30000);
+
+        return () => clearInterval(interval);
+    }, [fetchAnalyticsData]);
 
     // Handle tab change
     const handleChangeTab = (event, newValue) => {
         setTabValue(newValue);
     };
 
-    // Initial data loading
-    useEffect(() => {
-        fetchAllData()
-            .catch(err => {
-                console.error("Error fetching data:", err);
-                if (err.response?.status === 401) {
-                    setError("Authentication error. Please log in again.");
-                } else {
-                    setError("Failed to load analytics data. Please try again later.");
-                }
-            });
-
-        // Set interval for real-time updates
-        const interval = setInterval(() => {
-            fetchAllData(false)
-                .catch(err => console.error("Error in automatic refresh:", err));
-        }, 30000); // Update every 30 seconds
-
-        return () => clearInterval(interval);
-    }, [timeRange, selectedRoute]);
-
-    // Fetch comprehensive analytics data
-    const fetchAllData = async (showLoading = true) => {
-        if (showLoading) setLoading(true);
-        setRefreshing(true);
-
-        try {
-            console.log("[Analytics] Fetching comprehensive analytics data...");
-
-            // First, try to get enhanced dashboard data from new analytics service
-            let dashboardResponse;
-            try {
-                dashboardResponse = await apiClient.get('/analytics/dashboard');
-                console.log("[Analytics] Enhanced dashboard data fetched:", dashboardResponse.data);
-                setDashboardData(dashboardResponse.data);
-
-                // Extract metrics from enhanced dashboard
-                if (dashboardResponse.data.globalMetrics) {
-                    const globalMetrics = dashboardResponse.data.globalMetrics;
-                    setDisplayMetrics({
-                        totalRequests: globalMetrics.totalRequests || 0,
-                        totalRejected: globalMetrics.totalRejections || 0,
-                        acceptanceRate: globalMetrics.totalRequests > 0
-                            ? Math.round(((globalMetrics.totalRequests - globalMetrics.totalRejections) / globalMetrics.totalRequests) * 100)
-                            : 100,
-                        currentMinuteRequests: globalMetrics.currentMinuteRequests || 0,
-                        previousMinuteRequests: globalMetrics.previousMinuteRequests || 0,
-                        currentMinuteRejected: globalMetrics.currentMinuteRejections || 0,
-                        previousMinuteRejected: globalMetrics.previousMinuteRejections || 0,
-                    });
-                }
-
-                // Extract route data for dropdown
-                if (dashboardResponse.data.routeAnalytics) {
-                    const routeAnalytics = dashboardResponse.data.routeAnalytics;
-                    const routeOptions = [
-                        { id: 'all', label: 'All Routes', value: 'all' },
-                        ...routeAnalytics.map(route => ({
-                            id: route.routeId,
-                            label: route.routeId,
-                            value: route.routeId
-                        }))
-                    ];
-                    setRoutes(routeOptions);
-
-                    // Process route distribution for charts
-                    const distribution = routeAnalytics
-                        .filter(route => route.totalRequests > 0)
-                        .map((route, index) => ({
-                            id: route.routeId,
-                            name: route.routeId,
-                            requests: route.totalRequests,
-                            rejected: route.totalRejections,
-                            avgResponseTime: route.averageResponseTime || 0,
-                            color: COLORS[index % COLORS.length]
-                        }));
-                    setRouteDistribution(distribution);
-                }
-
-            } catch (enhancedError) {
-                console.warn("[Analytics] Enhanced analytics not available, falling back to basic metrics:", enhancedError.message);
-
-                // Fallback to basic metrics endpoints
-                const [requestsResponse, minutelyResponse, rejectionsResponse, timeseriesResponse] = await Promise.all([
-                    apiClient.get(`/metrics/requests${selectedRoute !== 'all' ? `?routeId=${selectedRoute}` : ''}`),
-                    apiClient.get(`/metrics/minutely${selectedRoute !== 'all' ? `?routeId=${selectedRoute}` : ''}`),
-                    apiClient.get(`/metrics/rejections${selectedRoute !== 'all' ? `?routeId=${selectedRoute}` : ''}`),
-                    apiClient.get(`/metrics/timeseries?timeRange=${timeRange}${selectedRoute !== 'all' ? `&routeId=${selectedRoute}` : ''}`)
-                ]);
-
-                // Process basic metrics
-                const requests = requestsResponse.data;
-                const minutely = minutelyResponse.data;
-                const rejections = rejectionsResponse.data;
-                const timeseries = timeseriesResponse.data;
-
-                setDisplayMetrics({
-                    totalRequests: requests.requestCount || 0,
-                    totalRejected: requests.rejectedCount || 0,
-                    acceptanceRate: requests.requestCount > 0
-                        ? Math.round(((requests.requestCount - requests.rejectedCount) / requests.requestCount) * 100)
-                        : 100,
-                    currentMinuteRequests: minutely.requestsCurrentMinute || 0,
-                    previousMinuteRequests: minutely.requestsPreviousMinute || 0,
-                    currentMinuteRejected: minutely.rejectedCurrentMinute || 0,
-                    previousMinuteRejected: minutely.rejectedPreviousMinute || 0,
-                });
-
-                // Process rejection data
-                const rejectionReasons = rejections.rejectionReasons || {};
-                setRejectionData(Object.entries(rejectionReasons).map(([name, value]) => ({ name, value })));
-
-                // Process time series data
-                setTimeSeriesData(timeseries.timeSeries || []);
-                setResponseTimeData((timeseries.timeSeries || []).map(point => ({
-                    time: point.time,
-                    avg: point.avgResponseTime || 0,
-                    p95: 0
-                })));
-
-                // Set basic routes if not set
-                if (routes.length === 0) {
-                    setRoutes([{ id: 'all', label: 'All Routes', value: 'all' }]);
-                }
-            }
-
-        } catch (error) {
-            console.error('[Analytics] Error fetching analytics data:', error);
-            setError(error.response?.data?.message || error.message || 'Failed to fetch analytics data');
-        } finally {
-            if (showLoading) setLoading(false);
-            setRefreshing(false);
+    // Handle time range change
+    const handleTimeRangeChange = (event, newRange) => {
+        if (newRange !== null) {
+            setTimeRange(newRange);
+            // Trigger data refresh with new time range
+            fetchAnalyticsData();
         }
     };
 
     // Handle manual refresh
     const handleRefresh = () => {
-        setError(null);
-        fetchAllData(true);
+        fetchAnalyticsData(true);
     };
 
-    // Handle time range change
-    const handleTimeRangeChange = (event, newRange) => {
-        if (newRange !== null) {
-            setTimeRange(newRange);
-        }
+    // Get security health score
+    const getSecurityHealthScore = () => {
+        return dashboardData?.securityHealthScore || 0;
     };
 
-    // Handle route filter change
-    const handleRouteChange = (event) => {
-        setSelectedRoute(event.target.value);
+    // Get threat level color
+    const getThreatLevelColor = (level) => {
+        const colors = {
+            'CRITICAL': '#d32f2f',
+            'HIGH': '#f57c00',
+            'MEDIUM': '#fbc02d',
+            'LOW': '#388e3c',
+            'NORMAL': '#2196f3'
+        };
+        return colors[level] || colors.NORMAL;
     };
 
-    // Calculate metrics change indicators
-    const calculateChange = (current, previous) => {
-        if (previous === 0) return current > 0 ? 100 : 0;
-        return Math.round(((current - previous) / previous) * 100);
+    // Format timestamp
+    const formatTimestamp = (timestamp) => {
+        return new Date(timestamp).toLocaleString();
     };
 
-    const requestsChange = calculateChange(
-        displayMetrics.currentMinuteRequests,
-        displayMetrics.previousMinuteRequests
-    );
-
-    const rejectedChange = calculateChange(
-        displayMetrics.currentMinuteRejected,
-        displayMetrics.previousMinuteRejected
-    );
-
-    // Get display name for selected route
-    const getSelectedRouteDisplayName = () => {
-        if (selectedRoute === 'all') return 'All Routes';
-        const route = routes.find(r => r.value === selectedRoute);
-        return route ? route.label : selectedRoute;
+    // Handle alert detail view
+    const handleAlertClick = (alert) => {
+        setAlertDetailDialog({ open: true, alert });
     };
 
-    // If loading initially, show spinner
+    // Handle AI insight detail view
+    const handleInsightClick = (insight) => {
+        setInsightDetailDialog({ open: true, insight });
+    };
+
+    // Loading state
     if (loading) {
         return (
             <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' }}>
-                <CircularProgress />
-                <Typography variant="h6" sx={{ ml: 2 }}>Loading Enhanced Analytics...</Typography>
+                <Box sx={{ textAlign: 'center' }}>
+                    <CircularProgress size={60} sx={{ color: 'primary.main', mb: 2 }} />
+                    <Typography variant="h6" color="text.secondary">
+                        Loading AI-Enhanced Analytics...
+                    </Typography>
+                </Box>
             </Box>
         );
     }
 
-    // If error occurred, show error message
+    // Error state
     if (error) {
         return (
             <Box sx={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '80vh', p: 3 }}>
-                <Alert severity="error" sx={{ mb: 2, maxWidth: 600 }}>
-                    <AlertTitle>Unable to Load Analytics</AlertTitle>
-                    {error}
-                </Alert>
-                <Button variant="contained" onClick={handleRefresh}>
-                    Try Again
-                </Button>
+                <Paper sx={{ p: 4, maxWidth: 500, textAlign: 'center', borderRadius: 2 }}>
+                    <ErrorOutlineIcon sx={{ fontSize: 60, color: '#f44336', mb: 2 }} />
+                    <Typography variant="h5" gutterBottom>
+                        Analytics Unavailable
+                    </Typography>
+                    <Typography variant="body1" color="text.secondary" paragraph>
+                        {error}
+                    </Typography>
+                    <Button variant="contained" onClick={() => { setError(null); fetchAnalyticsData(); }}>
+                        Retry
+                    </Button>
+                </Paper>
             </Box>
         );
     }
 
     return (
         <Box sx={{ p: 3, animation: `${fadeIn} 0.6s ease-out` }}>
-            {/* Header */}
+            {/* Header with AI Badge */}
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4, flexWrap: 'wrap', gap: 2 }}>
                 <Box>
-                    <Typography variant="h4" component="h1" sx={{ fontWeight: 700, color: 'primary.main' }}>
-                        Enhanced Traffic Analytics
-                    </Typography>
-                    <Typography variant="subtitle1" color="text.secondary" sx={{ mt: 1 }}>
-                        {selectedRoute !== 'all' ? `Showing data for: ${getSelectedRouteDisplayName()}` : 'Real-time security and performance insights'}
-                    </Typography>
-                    {dashboardData?.analyticsVersion && (
-                        <Typography variant="caption" color="text.secondary">
-                            Powered by {dashboardData.analyticsVersion}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
+                        <Typography variant="h4" component="h1" sx={{ fontWeight: 700, color: 'primary.main' }}>
+                            Security Analytics
                         </Typography>
-                    )}
-                </Box>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-                    {/* Time range selector */}
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                        <DateRangeIcon sx={{ mr: 1, color: 'text.secondary', display: { xs: 'none', sm: 'block' } }} />
-                        <TimeRangeToggle
-                            value={timeRange}
-                            exclusive
-                            onChange={handleTimeRangeChange}
-                            aria-label="time range"
-                            size={isMobile ? "small" : "medium"}
-                        >
-                            <ToggleButton value="1h">Last Hour</ToggleButton>
-                            <ToggleButton value="24h">24 Hours</ToggleButton>
-                            <ToggleButton value="7d">7 Days</ToggleButton>
-                        </TimeRangeToggle>
-                    </Box>
-
-                    {/* Route filter */}
-                    <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 200 } }}>
-                        <InputLabel id="route-select-label">Route</InputLabel>
-                        <Select
-                            labelId="route-select-label"
-                            value={selectedRoute}
-                            label="Route"
-                            onChange={handleRouteChange}
-                        >
-                            {routes.map(route => (
-                                <MenuItem key={route.id} value={route.value}>
-                                    {route.label}
-                                </MenuItem>
-                            ))}
-                        </Select>
-                    </FormControl>
-
-                    {/* Refresh button */}
-                    <Tooltip title="Refresh data">
-                        <RefreshButton
+                        <Chip
+                            icon={<AutoAwesomeIcon />}
+                            label="AI-Enhanced"
+                            color="secondary"
                             variant="outlined"
-                            color="primary"
+                            sx={{
+                                background: 'linear-gradient(45deg, rgba(138, 43, 226, 0.1), rgba(75, 0, 130, 0.1))',
+                                border: '1px solid rgba(138, 43, 226, 0.3)'
+                            }}
+                        />
+                    </Box>
+                    <Typography variant="subtitle1" color="text.secondary">
+                        Real-time threat detection with AI-powered insights
+                    </Typography>
+                </Box>
+
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+                    {/* Time Range Selector */}
+                    <ToggleButtonGroup
+                        value={timeRange}
+                        exclusive
+                        onChange={handleTimeRangeChange}
+                        aria-label="time range"
+                        size={isMobile ? "small" : "medium"}
+                    >
+                        <ToggleButton value="1h">1H</ToggleButton>
+                        <ToggleButton value="24h">24H</ToggleButton>
+                        <ToggleButton value="7d">7D</ToggleButton>
+                        <ToggleButton value="30d">30D</ToggleButton>
+                    </ToggleButtonGroup>
+
+                    {/* Refresh Button */}
+                    <Tooltip title="Refresh data">
+                        <IconButton
                             onClick={handleRefresh}
                             disabled={refreshing}
+                            sx={{
+                                backgroundColor: 'background.paper',
+                                border: '1px solid',
+                                borderColor: 'divider'
+                            }}
                         >
-                            <RefreshIcon
-                                sx={{
-                                    animation: refreshing ? `${pulse} 1s infinite` : 'none'
-                                }}
-                            />
-                        </RefreshButton>
+                            <RefreshIcon sx={{ animation: refreshing ? `${pulse} 1s infinite` : 'none' }} />
+                        </IconButton>
                     </Tooltip>
-
-                    <SyncButton />
                 </Box>
             </Box>
 
-            {/* AI Security Health Score */}
-            {dashboardData?.securityHealthScore !== undefined && (
-                <Alert
-                    severity={dashboardData.securityHealthScore > 80 ? "success" : dashboardData.securityHealthScore > 60 ? "warning" : "error"}
-                    sx={{ mb: 3 }}
-                >
-                    <AlertTitle>Security Health Score: {dashboardData.securityHealthScore.toFixed(1)}/100</AlertTitle>
-                    {dashboardData.securityHealthScore > 80 ? "Your system security is excellent!" :
-                        dashboardData.securityHealthScore > 60 ? "Security status is good but could be improved." :
-                            "Security attention required - consider reviewing threat analysis."}
-                </Alert>
-            )}
-
-            {/* Overview metrics cards */}
+            {/* Security Health Score & Key Metrics */}
             <Grid container spacing={3} sx={{ mb: 4 }}>
-                {/* Total Requests */}
-                <Grid item xs={12} sm={6} md={3}>
-                    <StyledCard>
-                        <CardContent>
-                            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                                <Box
-                                    sx={{
-                                        backgroundColor: alpha('#0088FE', 0.1),
-                                        borderRadius: '50%',
-                                        p: 1.5,
-                                        mr: 2,
-                                        color: '#0088FE',
-                                    }}
-                                >
-                                    <NetworkCheckIcon />
-                                </Box>
-                                <Box>
-                                    <MetricTitle variant="subtitle2">
-                                        Total Requests
-                                    </MetricTitle>
-                                    <MetricValue variant="h4" sx={{ color: '#0088FE' }}>
-                                        {displayMetrics.totalRequests.toLocaleString()}
-                                    </MetricValue>
-                                </Box>
-                            </Box>
-                            <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                                <Typography
-                                    variant="body2"
-                                    sx={{
-                                        bgcolor: alpha(requestsChange >= 0 ? '#4caf50' : '#f44336', 0.1),
-                                        color: requestsChange >= 0 ? '#4caf50' : '#f44336',
-                                        px: 1,
-                                        py: 0.5,
-                                        borderRadius: 1,
-                                        fontWeight: 500,
-                                    }}
-                                >
-                                    {requestsChange >= 0 ? '+' : ''}{requestsChange}% from previous minute
-                                </Typography>
-                            </Box>
-                        </CardContent>
-                    </StyledCard>
+                {/* Security Health Score */}
+                <Grid item xs={12} md={4}>
+                    <HealthScoreCard score={getSecurityHealthScore()}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 2 }}>
+                            <ShieldIcon sx={{ fontSize: 40, color: getThreatLevelColor(getSecurityHealthScore() >= 70 ? 'LOW' : 'HIGH'), mr: 1 }} />
+                            <Typography variant="h6" fontWeight={600}>
+                                Security Health
+                            </Typography>
+                        </Box>
+                        <Typography variant="h2" fontWeight={700} sx={{ mb: 1 }}>
+                            {getSecurityHealthScore().toFixed(0)}%
+                        </Typography>
+                        <LinearProgress
+                            variant="determinate"
+                            value={getSecurityHealthScore()}
+                            sx={{
+                                height: 8,
+                                borderRadius: 4,
+                                mb: 1,
+                                backgroundColor: alpha(getThreatLevelColor(getSecurityHealthScore() >= 70 ? 'LOW' : 'HIGH'), 0.2),
+                                '& .MuiLinearProgress-bar': {
+                                    backgroundColor: getThreatLevelColor(getSecurityHealthScore() >= 70 ? 'LOW' : 'HIGH')
+                                }
+                            }}
+                        />
+                        <Typography variant="body2" color="text.secondary">
+                            {getSecurityHealthScore() >= 90 ? 'Excellent' :
+                                getSecurityHealthScore() >= 70 ? 'Good' :
+                                    getSecurityHealthScore() >= 50 ? 'Fair' : 'Critical'}
+                        </Typography>
+                    </HealthScoreCard>
                 </Grid>
 
-                {/* Total Rejected */}
-                <Grid item xs={12} sm={6} md={3}>
-                    <StyledCard>
-                        <CardContent>
-                            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                                <Box
+                {/* Active Threats */}
+                <Grid item xs={12} md={4}>
+                    <MetricCard color="#f44336">
+                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+                            <Typography variant="h6" fontWeight={600}>
+                                Active Threats
+                            </Typography>
+                            <BugReportIcon sx={{ color: '#f44336' }} />
+                        </Box>
+                        <Typography variant="h3" fontWeight={700} sx={{ mb: 1, color: '#f44336' }}>
+                            {activeAlerts?.length || 0}
+                        </Typography>
+                        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                            {Object.entries(activeAlerts?.reduce((acc, alert) => {
+                                acc[alert.severity] = (acc[alert.severity] || 0) + 1;
+                                return acc;
+                            }, {}) || {}).map(([severity, count]) => (
+                                <Chip
+                                    key={severity}
+                                    label={`${severity}: ${count}`}
+                                    size="small"
                                     sx={{
-                                        backgroundColor: alpha('#FF5252', 0.1),
-                                        borderRadius: '50%',
-                                        p: 1.5,
-                                        mr: 2,
-                                        color: '#FF5252',
+                                        backgroundColor: alpha(getThreatLevelColor(severity), 0.1),
+                                        color: getThreatLevelColor(severity),
+                                        fontWeight: 600
                                     }}
-                                >
-                                    <ErrorOutlineIcon />
-                                </Box>
-                                <Box>
-                                    <MetricTitle variant="subtitle2">
-                                        Total Rejected
-                                    </MetricTitle>
-                                    <MetricValue variant="h4" sx={{ color: '#FF5252' }}>
-                                        {displayMetrics.totalRejected.toLocaleString()}
-                                    </MetricValue>
-                                </Box>
-                            </Box>
-                            <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                                <Typography
-                                    variant="body2"
-                                    sx={{
-                                        bgcolor: alpha(rejectedChange <= 0 ? '#4caf50' : '#f44336', 0.1),
-                                        color: rejectedChange <= 0 ? '#4caf50' : '#f44336',
-                                        px: 1,
-                                        py: 0.5,
-                                        borderRadius: 1,
-                                        fontWeight: 500,
-                                    }}
-                                >
-                                    {rejectedChange >= 0 ? '+' : ''}{rejectedChange}% from previous minute
-                                </Typography>
-                            </Box>
-                        </CardContent>
-                    </StyledCard>
+                                />
+                            ))}
+                        </Box>
+                    </MetricCard>
                 </Grid>
 
-                {/* Current Traffic */}
-                <Grid item xs={12} sm={6} md={3}>
-                    <StyledCard>
-                        <CardContent>
-                            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                                <Box
-                                    sx={{
-                                        backgroundColor: alpha('#00C49F', 0.1),
-                                        borderRadius: '50%',
-                                        p: 1.5,
-                                        mr: 2,
-                                        color: '#00C49F',
-                                    }}
-                                >
-                                    <SpeedIcon />
-                                </Box>
-                                <Box>
-                                    <MetricTitle variant="subtitle2">
-                                        Current Minute
-                                    </MetricTitle>
-                                    <MetricValue variant="h4" sx={{ color: '#00C49F' }}>
-                                        {displayMetrics.currentMinuteRequests.toLocaleString()}
-                                    </MetricValue>
-                                </Box>
-                            </Box>
-                            <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                                <Typography
-                                    variant="body2"
-                                    color="text.secondary"
-                                >
-                                    Requests in the current minute
-                                </Typography>
-                            </Box>
-                        </CardContent>
-                    </StyledCard>
-                </Grid>
-
-                {/* Acceptance Rate */}
-                <Grid item xs={12} sm={6} md={3}>
-                    <StyledCard>
-                        <CardContent>
-                            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                                <Box
-                                    sx={{
-                                        backgroundColor: alpha('#FFBB28', 0.1),
-                                        borderRadius: '50%',
-                                        p: 1.5,
-                                        mr: 2,
-                                        color: '#FFBB28',
-                                    }}
-                                >
-                                    <CheckCircleOutlineIcon />
-                                </Box>
-                                <Box>
-                                    <MetricTitle variant="subtitle2">
-                                        Acceptance Rate
-                                    </MetricTitle>
-                                    <MetricValue variant="h4" sx={{ color: '#FFBB28' }}>
-                                        {displayMetrics.acceptanceRate}%
-                                    </MetricValue>
-                                </Box>
-                            </Box>
-                            <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                                <Typography
-                                    variant="body2"
-                                    color="text.secondary"
-                                >
-                                    {displayMetrics.totalRequests - displayMetrics.totalRejected} accepted requests
-                                </Typography>
-                            </Box>
-                        </CardContent>
-                    </StyledCard>
+                {/* AI Confidence */}
+                <Grid item xs={12} md={4}>
+                    <MetricCard color="#9c27b0">
+                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+                            <Typography variant="h6" fontWeight={600}>
+                                AI Confidence
+                            </Typography>
+                            <SmartToyIcon sx={{ color: '#9c27b0' }} />
+                        </Box>
+                        <Typography variant="h3" fontWeight={700} sx={{ mb: 1, color: '#9c27b0' }}>
+                            {((aiInsights?.confidenceLevel || 0.75) * 100).toFixed(0)}%
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                            Machine learning accuracy in threat detection
+                        </Typography>
+                    </MetricCard>
                 </Grid>
             </Grid>
 
-            {/* Chart Tabs */}
-            <ChartContainer>
-                <StyledTabs
-                    value={tabValue}
-                    onChange={handleChangeTab}
-                    variant={isMobile ? "scrollable" : "fullWidth"}
-                    scrollButtons={isMobile ? "auto" : false}
-                    aria-label="analytics charts tabs"
-                >
-                    <Tab
-                        icon={<TimelineIcon />}
-                        iconPosition="start"
-                        label="Traffic Over Time"
-                        id="analytics-tab-0"
-                        aria-controls="analytics-tabpanel-0"
-                    />
-                    <Tab
-                        icon={<PieChartIcon />}
-                        iconPosition="start"
-                        label="Rejection Reasons"
-                        id="analytics-tab-1"
-                        aria-controls="analytics-tabpanel-1"
-                    />
-                    <Tab
-                        icon={<InsightsIcon />}
-                        iconPosition="start"
-                        label="Response Time"
-                        id="analytics-tab-2"
-                        aria-controls="analytics-tabpanel-2"
-                    />
-                    <Tab
-                        icon={<BarChartIcon />}
-                        iconPosition="start"
-                        label="Traffic by Route"
-                        id="analytics-tab-3"
-                        aria-controls="analytics-tabpanel-3"
-                    />
-                </StyledTabs>
+            {/* Main Dashboard Tabs */}
+            <StyledCard sx={{ minHeight: '600px' }}>
+                <Box sx={{ p: 3 }}>
+                    <Tabs
+                        value={tabValue}
+                        onChange={handleChangeTab}
+                        variant={isMobile ? "scrollable" : "fullWidth"}
+                        scrollButtons={isMobile ? "auto" : false}
+                        sx={{
+                            mb: 3,
+                            '& .MuiTab-root': {
+                                minWidth: 'auto',
+                                padding: theme.spacing(1.5, 2),
+                                textTransform: 'none',
+                                fontWeight: 500,
+                                borderRadius: '8px 8px 0 0',
+                                '&.Mui-selected': {
+                                    fontWeight: 700,
+                                    color: 'primary.main',
+                                },
+                            },
+                        }}
+                    >
+                        <Tab icon={<TimelineIcon />} iconPosition="start" label="Threat Timeline" />
+                        <Tab icon={<SmartToyIcon />} iconPosition="start" label="AI Insights" />
+                        <Tab icon={<SecurityIcon />} iconPosition="start" label="Attack Patterns" />
+                        <Tab icon={<GavelIcon />} iconPosition="start" label="Compliance" />
+                        <Tab icon={<BarChartIcon />} iconPosition="start" label="Performance" />
+                    </Tabs>
 
-                <Divider sx={{ mb: 3 }} />
+                    <Divider sx={{ mb: 3 }} />
 
-                {/* Traffic Over Time Tab Panel */}
-                <TabPanel value={tabValue} index={0}>
-                    <Box sx={{ height: 400 }}>
-                        <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
-                            Traffic Over Time
-                            {selectedRoute !== 'all' && (
-                                <Typography component="span" variant="body2" color="text.secondary" sx={{ ml: 1 }}>
-                                    - {getSelectedRouteDisplayName()}
-                                </Typography>
-                            )}
-                        </Typography>
-                        {timeSeriesData.length === 0 ? (
-                            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80%' }}>
-                                <Typography variant="body1" color="text.secondary">
-                                    No traffic data available for the selected time range
-                                </Typography>
-                            </Box>
-                        ) : (
-                            <ResponsiveContainer width="100%" height="100%">
-                                <AreaChart
-                                    data={timeSeriesData}
-                                    margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
-                                >
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                                    <XAxis dataKey="time" />
-                                    <YAxis />
-                                    <RechartsTooltip
-                                        formatter={(value, name) => [`${value} requests`, name === 'accepted' ? 'Accepted' : name === 'rejected' ? 'Rejected' : 'Total']}
-                                    />
-                                    <Legend />
-                                    <Area
-                                        type="monotone"
-                                        dataKey="accepted"
-                                        stackId="1"
-                                        stroke="#00C49F"
-                                        fill="#00C49F"
-                                        name="Accepted"
-                                    />
-                                    <Area
-                                        type="monotone"
-                                        dataKey="rejected"
-                                        stackId="1"
-                                        stroke="#FF5252"
-                                        fill="#FF5252"
-                                        name="Rejected"
-                                    />
-                                </AreaChart>
-                            </ResponsiveContainer>
-                        )}
-                    </Box>
-                </TabPanel>
+                    {/* Real-time Threat Timeline */}
+                    <TabPanel value={tabValue} index={0}>
+                        <Box sx={{ height: 500 }}>
+                            <Typography variant="h6" sx={{ mb: 3, fontWeight: 600 }}>
+                                Real-time Threat Timeline
+                            </Typography>
 
-                {/* Rejection Reasons Tab Panel */}
-                <TabPanel value={tabValue} index={1}>
-                    <Box sx={{ height: 400 }}>
-                        <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
-                            Rejection Reasons
-                            {selectedRoute !== 'all' && (
-                                <Typography component="span" variant="body2" color="text.secondary" sx={{ ml: 1 }}>
-                                    - {getSelectedRouteDisplayName()}
-                                </Typography>
-                            )}
-                        </Typography>
-                        {rejectionData.length === 0 ? (
-                            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80%' }}>
-                                <Typography variant="body1" color="text.secondary">
-                                    No rejected requests to display
-                                </Typography>
-                            </Box>
-                        ) : (
-                            <ResponsiveContainer width="100%" height="100%">
-                                <PieChart>
-                                    <Pie
-                                        data={rejectionData}
-                                        cx="50%"
-                                        cy="50%"
-                                        labelLine={false}
-                                        outerRadius={150}
-                                        fill="#8884d8"
-                                        dataKey="value"
-                                        nameKey="name"
-                                        label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                                    >
-                                        {rejectionData.map((entry, index) => (
-                                            <Cell
-                                                key={`cell-${index}`}
-                                                fill={REJECTION_COLORS[entry.name] || COLORS[index % COLORS.length]}
-                                            />
+                            <Grid container spacing={3}>
+                                {/* Recent Alerts Timeline */}
+                                <Grid item xs={12} md={8}>
+                                    <Paper sx={{ p: 2, height: 400, overflow: 'auto' }}>
+                                        {activeAlerts?.slice(0, 10).map((alert, index) => (
+                                            <TimelineItem
+                                                key={alert.id || index}
+                                                severity={alert.severity}
+                                                onClick={() => handleAlertClick(alert)}
+                                                sx={{ cursor: 'pointer' }}
+                                            >
+                                                <FiberManualRecordIcon
+                                                    sx={{
+                                                        color: getThreatLevelColor(alert.severity),
+                                                        mr: 2,
+                                                        fontSize: 12
+                                                    }}
+                                                />
+                                                <Box sx={{ flexGrow: 1 }}>
+                                                    <Typography variant="subtitle2" fontWeight={600}>
+                                                        {alert.title}
+                                                    </Typography>
+                                                    <Typography variant="body2" color="text.secondary">
+                                                        {alert.sourceIp} • {formatTimestamp(alert.timestamp)}
+                                                    </Typography>
+                                                </Box>
+                                                <Chip
+                                                    label={alert.severity}
+                                                    size="small"
+                                                    sx={{
+                                                        backgroundColor: alpha(getThreatLevelColor(alert.severity), 0.1),
+                                                        color: getThreatLevelColor(alert.severity)
+                                                    }}
+                                                />
+                                            </TimelineItem>
                                         ))}
-                                    </Pie>
-                                    <RechartsTooltip formatter={(value) => [`${value} requests`, 'Rejected']} />
-                                    <Legend />
-                                </PieChart>
-                            </ResponsiveContainer>
-                        )}
-                    </Box>
-                </TabPanel>
 
-                {/* Response Time Tab Panel */}
-                <TabPanel value={tabValue} index={2}>
-                    <Box sx={{ height: 400 }}>
-                        <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
-                            Response Time
-                            {selectedRoute !== 'all' && (
-                                <Typography component="span" variant="body2" color="text.secondary" sx={{ ml: 1 }}>
-                                    - {getSelectedRouteDisplayName()}
-                                </Typography>
-                            )}
-                        </Typography>
-                        {responseTimeData.every(point => point.avg === 0) ? (
-                            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80%' }}>
-                                <Typography variant="body1" color="text.secondary">
-                                    No response time data available
-                                </Typography>
-                            </Box>
-                        ) : (
-                            <ResponsiveContainer width="100%" height="100%">
-                                <LineChart
-                                    data={responseTimeData}
-                                    margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
-                                >
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                                    <XAxis dataKey="time" />
-                                    <YAxis unit="ms" />
-                                    <RechartsTooltip formatter={(value) => [`${value} ms`]} />
-                                    <Legend />
-                                    <Line
-                                        type="monotone"
-                                        dataKey="avg"
-                                        stroke="#0088FE"
-                                        name="Average"
-                                        strokeWidth={2}
-                                        dot={false}
-                                        activeDot={{ r: 8 }}
-                                    />
-                                </LineChart>
-                            </ResponsiveContainer>
-                        )}
-                    </Box>
-                </TabPanel>
+                                        {(!activeAlerts || activeAlerts.length === 0) && (
+                                            <Box sx={{ textAlign: 'center', py: 4 }}>
+                                                <CheckCircleOutlineIcon sx={{ fontSize: 60, color: 'success.main', mb: 2 }} />
+                                                <Typography variant="h6" color="success.main">
+                                                    No Active Threats
+                                                </Typography>
+                                                <Typography variant="body2" color="text.secondary">
+                                                    Your security posture is currently stable
+                                                </Typography>
+                                            </Box>
+                                        )}
+                                    </Paper>
+                                </Grid>
 
-                {/* Traffic by Route Tab Panel */}
-                <TabPanel value={tabValue} index={3}>
-                    <Box sx={{ height: 400 }}>
-                        <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
-                            Traffic by Route
-                            {selectedRoute !== 'all' && (
-                                <Typography component="span" variant="body2" color="text.secondary" sx={{ ml: 1 }}>
-                                    - Filtered to {getSelectedRouteDisplayName()}
-                                </Typography>
-                            )}
-                        </Typography>
-                        {routeDistribution.length === 0 || routeDistribution.every(route => route.requests === 0) ? (
-                            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80%' }}>
-                                <Typography variant="body1" color="text.secondary">
-                                    No traffic data available for routes
-                                </Typography>
-                            </Box>
-                        ) : (
-                            <ResponsiveContainer width="100%" height="100%">
-                                <BarChart
-                                    data={routeDistribution}
-                                    margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
-                                    layout="vertical"
-                                >
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                                    <XAxis type="number" />
-                                    <YAxis type="category" dataKey="name" width={150} />
-                                    <RechartsTooltip formatter={(value) => [`${value} requests`]} />
-                                    <Bar dataKey="requests" fill="#FF914D">
-                                        {routeDistribution.map((entry, index) => (
-                                            <Cell key={`cell-${index}`} fill={entry.color} />
-                                        ))}
-                                    </Bar>
-                                </BarChart>
-                            </ResponsiveContainer>
-                        )}
-                    </Box>
-                </TabPanel>
-            </ChartContainer>
+                                {/* Threat Statistics */}
+                                <Grid item xs={12} md={4}>
+                                    <Paper sx={{ p: 2, height: 400 }}>
+                                        <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 2 }}>
+                                            Threat Distribution
+                                        </Typography>
 
-            {/* AI Insights Panel */}
-            {dashboardData?.aiSecurityInsights && (
-                <Box sx={{ mt: 3 }}>
-                    <Typography variant="h5" sx={{ mb: 2, fontWeight: 600 }}>
-                        AI Security Insights
-                    </Typography>
-                    <Grid container spacing={2}>
-                        {dashboardData.aiSecurityInsights.aiRecommendations?.slice(0, 3).map((recommendation, index) => (
-                            <Grid item xs={12} md={4} key={index}>
-                                <Alert severity={recommendation.priority === 'HIGH' ? 'error' : recommendation.priority === 'MEDIUM' ? 'warning' : 'info'}>
-                                    <AlertTitle>{recommendation.title}</AlertTitle>
-                                    {recommendation.description}
-                                </Alert>
+                                        {Object.entries(activeAlerts?.reduce((acc, alert) => {
+                                            acc[alert.severity] = (acc[alert.severity] || 0) + 1;
+                                            return acc;
+                                        }, {}) || {}).length > 0 ? (
+                                            <ResponsiveContainer width="100%" height={300}>
+                                                <PieChart>
+                                                    <Pie
+                                                        data={Object.entries(activeAlerts?.reduce((acc, alert) => {
+                                                            acc[alert.severity] = (acc[alert.severity] || 0) + 1;
+                                                            return acc;
+                                                        }, {}) || {}).map(([name, value]) => ({ name, value }))}
+                                                        cx="50%"
+                                                        cy="50%"
+                                                        outerRadius={80}
+                                                        fill="#8884d8"
+                                                        dataKey="value"
+                                                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                                                    >
+                                                        {Object.keys(THREAT_COLORS).map((entry, index) => (
+                                                            <Cell key={`cell-${index}`} fill={THREAT_COLORS[entry]} />
+                                                        ))}
+                                                    </Pie>
+                                                    <RechartsTooltip />
+                                                </PieChart>
+                                            </ResponsiveContainer>
+                                        ) : (
+                                            <Box sx={{ textAlign: 'center', py: 4 }}>
+                                                <Typography variant="body2" color="text.secondary">
+                                                    No threat data to display
+                                                </Typography>
+                                            </Box>
+                                        )}
+                                    </Paper>
+                                </Grid>
                             </Grid>
-                        ))}
-                    </Grid>
+                        </Box>
+                    </TabPanel>
+
+                    {/* AI Insights Panel */}
+                    <TabPanel value={tabValue} index={1}>
+                        <Box sx={{ height: 500 }}>
+                            <Typography variant="h6" sx={{ mb: 3, fontWeight: 600, display: 'flex', alignItems: 'center' }}>
+                                <SmartToyIcon sx={{ mr: 1 }} />
+                                AI Security Insights
+                            </Typography>
+
+                            <Grid container spacing={3}>
+                                {/* AI Insights Cards */}
+                                <Grid item xs={12} md={6}>
+                                    <AICard sx={{ p: 2, height: 400, overflow: 'auto' }}>
+                                        <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 2 }}>
+                                            Behavioral Anomalies
+                                        </Typography>
+
+                                        {aiInsights?.behavioralAnomalies?.map((anomaly, index) => (
+                                            <Box
+                                                key={index}
+                                                sx={{
+                                                    p: 2,
+                                                    mb: 2,
+                                                    borderRadius: 2,
+                                                    backgroundColor: alpha('#9c27b0', 0.05),
+                                                    border: '1px solid',
+                                                    borderColor: alpha('#9c27b0', 0.1),
+                                                    cursor: 'pointer',
+                                                    '&:hover': {
+                                                        backgroundColor: alpha('#9c27b0', 0.1)
+                                                    }
+                                                }}
+                                                onClick={() => handleInsightClick(anomaly)}
+                                            >
+                                                <Typography variant="subtitle2" fontWeight={600}>
+                                                    {anomaly.clientIp}
+                                                </Typography>
+                                                <Typography variant="body2" color="text.secondary">
+                                                    Anomaly Score: {(anomaly.anomalyScore * 100).toFixed(1)}%
+                                                </Typography>
+                                                <Typography variant="caption" color="text.secondary">
+                                                    {anomaly.eventCount} events analyzed
+                                                </Typography>
+                                            </Box>
+                                        )) || (
+                                            <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
+                                                No behavioral anomalies detected
+                                            </Typography>
+                                        )}
+                                    </AICard>
+                                </Grid>
+
+                                {/* AI Recommendations */}
+                                <Grid item xs={12} md={6}>
+                                    <AICard sx={{ p: 2, height: 400, overflow: 'auto' }}>
+                                        <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 2 }}>
+                                            AI Recommendations
+                                        </Typography>
+
+                                        {aiInsights?.aiRecommendations?.map((rec, index) => (
+                                            <Alert
+                                                key={index}
+                                                severity={rec.priority === 'CRITICAL' ? 'error' :
+                                                    rec.priority === 'HIGH' ? 'warning' : 'info'}
+                                                sx={{ mb: 2 }}
+                                            >
+                                                <AlertTitle>{rec.title}</AlertTitle>
+                                                {rec.description}
+                                            </Alert>
+                                        )) || (
+                                            <Alert severity="success">
+                                                <AlertTitle>All Systems Optimal</AlertTitle>
+                                                No immediate recommendations from AI analysis
+                                            </Alert>
+                                        )}
+                                    </AICard>
+                                </Grid>
+
+                                {/* Threat Predictions */}
+                                <Grid item xs={12}>
+                                    <Paper sx={{ p: 2 }}>
+                                        <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 2 }}>
+                                            AI Threat Predictions (Next 6 Hours)
+                                        </Typography>
+
+                                        {aiInsights?.threatPredictions?.predictions ? (
+                                            <ResponsiveContainer width="100%" height={200}>
+                                                <LineChart data={aiInsights.threatPredictions.predictions}>
+                                                    <CartesianGrid strokeDasharray="3 3" />
+                                                    <XAxis dataKey="hour" />
+                                                    <YAxis />
+                                                    <RechartsTooltip />
+                                                    <Legend />
+                                                    <Line
+                                                        type="monotone"
+                                                        dataKey="attackLikelihood"
+                                                        stroke="#9c27b0"
+                                                        strokeWidth={3}
+                                                        dot={{ fill: '#9c27b0', strokeWidth: 2, r: 4 }}
+                                                        name="Threat Likelihood"
+                                                    />
+                                                </LineChart>
+                                            </ResponsiveContainer>
+                                        ) : (
+                                            <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
+                                                Threat prediction data unavailable
+                                            </Typography>
+                                        )}
+                                    </Paper>
+                                </Grid>
+                            </Grid>
+                        </Box>
+                    </TabPanel>
+
+                    {/* Attack Patterns Visualization */}
+                    <TabPanel value={tabValue} index={2}>
+                        <Box sx={{ height: 500 }}>
+                            <Typography variant="h6" sx={{ mb: 3, fontWeight: 600 }}>
+                                Interactive Attack Pattern Analysis
+                            </Typography>
+
+                            <Grid container spacing={3}>
+                                {/* Attack Pattern Analysis */}
+                                <Grid item xs={12} md={8}>
+                                    <Paper sx={{ p: 2, height: 400 }}>
+                                        <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 2 }}>
+                                            Attack Pattern Distribution
+                                        </Typography>
+
+                                        {threatLandscape?.topThreatPatterns ? (
+                                            <ResponsiveContainer width="100%" height={350}>
+                                                <BarChart data={threatLandscape.topThreatPatterns.slice(0, 10)}>
+                                                    <CartesianGrid strokeDasharray="3 3" />
+                                                    <XAxis dataKey="patternName" angle={-45} textAnchor="end" height={100} />
+                                                    <YAxis />
+                                                    <RechartsTooltip />
+                                                    <Bar dataKey="triggerCount" fill="#FF914D" />
+                                                </BarChart>
+                                            </ResponsiveContainer>
+                                        ) : (
+                                            <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
+                                                No attack pattern data available
+                                            </Typography>
+                                        )}
+                                    </Paper>
+                                </Grid>
+
+                                {/* Geographic Threats */}
+                                <Grid item xs={12} md={4}>
+                                    <Paper sx={{ p: 2, height: 400, overflow: 'auto' }}>
+                                        <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 2 }}>
+                                            Geographic Threats
+                                        </Typography>
+
+                                        {threatIntelligence?.realTimeMetrics?.geographicThreats?.map((threat, index) => (
+                                            <Box key={index} sx={{ p: 1.5, mb: 1, borderRadius: 1, backgroundColor: 'background.default' }}>
+                                                <Typography variant="body2" fontWeight={600}>
+                                                    {threat}
+                                                </Typography>
+                                            </Box>
+                                        )) || (
+                                            <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
+                                                No geographic threat data
+                                            </Typography>
+                                        )}
+                                    </Paper>
+                                </Grid>
+                            </Grid>
+                        </Box>
+                    </TabPanel>
+
+                    {/* Compliance Dashboard */}
+                    <TabPanel value={tabValue} index={3}>
+                        <Box sx={{ height: 500 }}>
+                            <Typography variant="h6" sx={{ mb: 3, fontWeight: 600 }}>
+                                Security Compliance Dashboard
+                            </Typography>
+
+                            <Grid container spacing={3}>
+                                {/* Compliance Overview */}
+                                <Grid item xs={12} md={8}>
+                                    <Paper sx={{ p: 2, height: 400 }}>
+                                        <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 2 }}>
+                                            Compliance Framework Status
+                                        </Typography>
+
+                                        {complianceData?.frameworkStatuses ? (
+                                            <ResponsiveContainer width="100%" height={350}>
+                                                <BarChart data={complianceData.frameworkStatuses}>
+                                                    <CartesianGrid strokeDasharray="3 3" />
+                                                    <XAxis dataKey="framework" />
+                                                    <YAxis />
+                                                    <RechartsTooltip />
+                                                    <Bar dataKey="score" fill="#00C49F" />
+                                                </BarChart>
+                                            </ResponsiveContainer>
+                                        ) : (
+                                            <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
+                                                Compliance data loading...
+                                            </Typography>
+                                        )}
+                                    </Paper>
+                                </Grid>
+
+                                {/* Compliance Metrics */}
+                                <Grid item xs={12} md={4}>
+                                    <Paper sx={{ p: 2, height: 400, overflow: 'auto' }}>
+                                        <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 2 }}>
+                                            Compliance Metrics
+                                        </Typography>
+
+                                        <Box sx={{ mb: 2 }}>
+                                            <Typography variant="body2" color="text.secondary">
+                                                Average Compliance Score
+                                            </Typography>
+                                            <Typography variant="h5" fontWeight={700} color="primary">
+                                                {(complianceData?.overallStatus?.averageComplianceScore || 0).toFixed(1)}%
+                                            </Typography>
+                                        </Box>
+
+                                        <Box sx={{ mb: 2 }}>
+                                            <Typography variant="body2" color="text.secondary">
+                                                Critical Issues
+                                            </Typography>
+                                            <Typography variant="h5" fontWeight={700} color="error">
+                                                {complianceData?.overallStatus?.totalCriticalIssues || 0}
+                                            </Typography>
+                                        </Box>
+
+                                        <Box sx={{ mb: 2 }}>
+                                            <Typography variant="body2" color="text.secondary">
+                                                Frameworks Monitored
+                                            </Typography>
+                                            <Typography variant="h5" fontWeight={700}>
+                                                {complianceData?.overallStatus?.frameworkCount || 0}
+                                            </Typography>
+                                        </Box>
+                                    </Paper>
+                                </Grid>
+                            </Grid>
+                        </Box>
+                    </TabPanel>
+
+                    {/* Performance Analytics */}
+                    <TabPanel value={tabValue} index={4}>
+                        <Box sx={{ height: 500 }}>
+                            <Typography variant="h6" sx={{ mb: 3, fontWeight: 600 }}>
+                                Performance & System Analytics
+                            </Typography>
+
+                            <Grid container spacing={3}>
+                                {/* Performance Metrics */}
+                                <Grid item xs={12} md={6}>
+                                    <Paper sx={{ p: 2, height: 400 }}>
+                                        <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 2 }}>
+                                            Request Performance
+                                        </Typography>
+
+                                        {dashboardData?.routeAnalytics ? (
+                                            <ResponsiveContainer width="100%" height={350}>
+                                                <ScatterChart data={dashboardData.routeAnalytics}>
+                                                    <CartesianGrid strokeDasharray="3 3" />
+                                                    <XAxis dataKey="totalRequests" name="Total Requests" />
+                                                    <YAxis dataKey="averageResponseTime" name="Avg Response Time (ms)" />
+                                                    <RechartsTooltip cursor={{ strokeDasharray: '3 3' }} />
+                                                    <Scatter name="Route Performance" dataKey="averageResponseTime" fill="#8884d8" />
+                                                </ScatterChart>
+                                            </ResponsiveContainer>
+                                        ) : (
+                                            <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
+                                                Performance data loading...
+                                            </Typography>
+                                        )}
+                                    </Paper>
+                                </Grid>
+
+                                {/* Route Health */}
+                                <Grid item xs={12} md={6}>
+                                    <Paper sx={{ p: 2, height: 400, overflow: 'auto' }}>
+                                        <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 2 }}>
+                                            Route Health Status
+                                        </Typography>
+
+                                        {dashboardData?.routeAnalytics?.map((route, index) => (
+                                            <Box
+                                                key={route.routeId || index}
+                                                sx={{
+                                                    p: 2,
+                                                    mb: 2,
+                                                    borderRadius: 2,
+                                                    backgroundColor: 'background.default',
+                                                    display: 'flex',
+                                                    justifyContent: 'space-between',
+                                                    alignItems: 'center'
+                                                }}
+                                            >
+                                                <Box>
+                                                    <Typography variant="subtitle2" fontWeight={600}>
+                                                        {route.routeId}
+                                                    </Typography>
+                                                    <Typography variant="body2" color="text.secondary">
+                                                        {route.totalRequests} requests • {(route.rejectionRate * 100).toFixed(1)}% rejected
+                                                    </Typography>
+                                                </Box>
+                                                <Box sx={{ textAlign: 'right' }}>
+                                                    <Chip
+                                                        label={route.securityStatus || 'NORMAL'}
+                                                        size="small"
+                                                        color={route.securityStatus === 'CRITICAL' ? 'error' :
+                                                            route.securityStatus === 'HIGH_RISK' ? 'warning' : 'success'}
+                                                    />
+                                                    <Typography variant="caption" display="block" color="text.secondary">
+                                                        Threat: {((route.threatScore || 0) * 100).toFixed(0)}%
+                                                    </Typography>
+                                                </Box>
+                                            </Box>
+                                        )) || (
+                                            <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
+                                                No route data available
+                                            </Typography>
+                                        )}
+                                    </Paper>
+                                </Grid>
+                            </Grid>
+                        </Box>
+                    </TabPanel>
                 </Box>
-            )}
+            </StyledCard>
+
+            {/* Alert Detail Dialog */}
+            <Dialog
+                open={alertDetailDialog.open}
+                onClose={() => setAlertDetailDialog({ open: false, alert: null })}
+                maxWidth="md"
+                fullWidth
+            >
+                <DialogTitle>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                        <WarningIcon sx={{ color: getThreatLevelColor(alertDetailDialog.alert?.severity) }} />
+                        Threat Alert Details
+                    </Box>
+                </DialogTitle>
+                <DialogContent>
+                    {alertDetailDialog.alert && (
+                        <Grid container spacing={2}>
+                            <Grid item xs={12}>
+                                <Typography variant="h6">{alertDetailDialog.alert.title}</Typography>
+                                <Typography variant="body2" color="text.secondary" paragraph>
+                                    {alertDetailDialog.alert.description}
+                                </Typography>
+                            </Grid>
+                            <Grid item xs={6}>
+                                <Typography variant="subtitle2">Severity</Typography>
+                                <Chip
+                                    label={alertDetailDialog.alert.severity}
+                                    sx={{
+                                        backgroundColor: alpha(getThreatLevelColor(alertDetailDialog.alert.severity), 0.1),
+                                        color: getThreatLevelColor(alertDetailDialog.alert.severity)
+                                    }}
+                                />
+                            </Grid>
+                            <Grid item xs={6}>
+                                <Typography variant="subtitle2">Source IP</Typography>
+                                <Typography variant="body1">{alertDetailDialog.alert.sourceIp}</Typography>
+                            </Grid>
+                            <Grid item xs={6}>
+                                <Typography variant="subtitle2">Target Route</Typography>
+                                <Typography variant="body1">{alertDetailDialog.alert.targetRoute || 'N/A'}</Typography>
+                            </Grid>
+                            <Grid item xs={6}>
+                                <Typography variant="subtitle2">Threat Score</Typography>
+                                <Typography variant="body1">{((alertDetailDialog.alert.threatScore || 0) * 100).toFixed(1)}%</Typography>
+                            </Grid>
+                        </Grid>
+                    )}
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setAlertDetailDialog({ open: false, alert: null })}>
+                        Close
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
+            {/* AI Insight Detail Dialog */}
+            <Dialog
+                open={insightDetailDialog.open}
+                onClose={() => setInsightDetailDialog({ open: false, insight: null })}
+                maxWidth="md"
+                fullWidth
+            >
+                <DialogTitle>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                        <SmartToyIcon sx={{ color: '#9c27b0' }} />
+                        AI Behavioral Analysis
+                    </Box>
+                </DialogTitle>
+                <DialogContent>
+                    {insightDetailDialog.insight && (
+                        <Grid container spacing={2}>
+                            <Grid item xs={12}>
+                                <Typography variant="h6">IP Address: {insightDetailDialog.insight.clientIp}</Typography>
+                            </Grid>
+                            <Grid item xs={6}>
+                                <Typography variant="subtitle2">Anomaly Score</Typography>
+                                <LinearProgress
+                                    variant="determinate"
+                                    value={insightDetailDialog.insight.anomalyScore * 100}
+                                    sx={{ mt: 1, height: 8, borderRadius: 4 }}
+                                />
+                                <Typography variant="body2">{(insightDetailDialog.insight.anomalyScore * 100).toFixed(1)}%</Typography>
+                            </Grid>
+                            <Grid item xs={6}>
+                                <Typography variant="subtitle2">Events Analyzed</Typography>
+                                <Typography variant="body1">{insightDetailDialog.insight.eventCount}</Typography>
+                            </Grid>
+                            <Grid item xs={12}>
+                                <Typography variant="subtitle2">Suspicious Activities</Typography>
+                                {insightDetailDialog.insight.suspiciousActivities?.map((activity, index) => (
+                                    <Typography key={index} variant="body2" sx={{ ml: 2 }}>
+                                        • {activity}
+                                    </Typography>
+                                )) || <Typography variant="body2">None detected</Typography>}
+                            </Grid>
+                        </Grid>
+                    )}
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setInsightDetailDialog({ open: false, insight: null })}>
+                        Close
+                    </Button>
+                </DialogActions>
+            </Dialog>
         </Box>
     );
 };

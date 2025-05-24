@@ -1,6 +1,8 @@
 package com.example.demo.Entity;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import java.time.LocalDateTime;
 
 @Entity
@@ -17,7 +19,8 @@ public class ThreatPattern {
     @Column(name = "pattern_type", nullable = false)
     private String patternType; // IP_FREQUENCY, PATH_PATTERN, USER_AGENT, GEOGRAPHIC, TEMPORAL
 
-    @Column(name = "pattern_definition", columnDefinition = "JSONB")
+    @Column(name = "pattern_definition")
+    @JdbcTypeCode(SqlTypes.JSON)
     private String patternDefinition; // JSON configuration for the pattern
 
     @Column(name = "threat_level", nullable = false)

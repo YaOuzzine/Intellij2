@@ -1,6 +1,8 @@
 package com.example.demo.Entity;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import java.time.LocalDateTime;
 import java.util.Map;
 
@@ -39,13 +41,15 @@ public class SecurityEvent {
     @Column(name = "response_time_ms")
     private Integer responseTimeMs;
 
-    @Column(name = "geo_location", columnDefinition = "JSONB")
+    @Column(name = "geo_location")
+    @JdbcTypeCode(SqlTypes.JSON)
     private String geoLocation; // Store as JSON string
 
     @Column(name = "threat_level", length = 20)
     private String threatLevel = "LOW"; // LOW, MEDIUM, HIGH, CRITICAL
 
-    @Column(name = "metadata", columnDefinition = "JSONB")
+    @Column(name = "metadata")
+    @JdbcTypeCode(SqlTypes.JSON)
     private String metadata; // Store additional data as JSON
 
     @Column(name = "session_id", length = 100)
@@ -57,7 +61,8 @@ public class SecurityEvent {
     @Column(name = "request_size")
     private Long requestSize;
 
-    @Column(name = "headers", columnDefinition = "JSONB")
+    @Column(name = "headers")
+    @JdbcTypeCode(SqlTypes.JSON)
     private String headers; // Store relevant headers as JSON
 
     // Constructors
