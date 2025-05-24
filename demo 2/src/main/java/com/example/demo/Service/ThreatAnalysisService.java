@@ -16,8 +16,9 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import javax.annotation.PostConstruct;
+import jakarta.annotation.PostConstruct;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
@@ -37,6 +38,8 @@ public class ThreatAnalysisService {
     private static final int SUSPICIOUS_IP_THRESHOLD = 50;   // rejections per hour
     private static final double ANOMALY_SCORE_THRESHOLD = 0.8;
     private static final long PATTERN_ANALYSIS_WINDOW_HOURS = 24;
+    private static final int TEMPORAL_ANALYSIS_MINUTES = 60;
+    private static final double RESPONSE_TIME_ANOMALY_MULTIPLIER = 3.0;
 
     @Autowired
     public ThreatAnalysisService(SecurityEventRepository eventRepository,
@@ -366,6 +369,10 @@ public class ThreatAnalysisService {
         createPatternIfNotExists("HIGH_FREQUENCY_IP", "IP_FREQUENCY", "MEDIUM",
                 "{\"requestsPerMinute\": 50, \"timeWindowMinutes\": 5}",
                 "Detects IPs making unusually high number of requests");
+
+        createPatternIfNotExists("NIGHT_TIME_ACTIVITY", "TEMPORAL", "MEDIUM",
+                "{\"suspiciousHours\": [22, 23, 0, 1, 2, 3, 4, 5], \"timezone\": \"UTC\"}",
+                "Detects unusual activity during night hours");
     }
 
     private void createPatternIfNotExists(String name, String type, String threatLevel,
@@ -380,10 +387,36 @@ public class ThreatAnalysisService {
         }
     }
 
-    // Helper methods for specific pattern evaluations
+    /**
+     * Enhanced IP frequency pattern evaluation
+     */
     private double evaluateIpFrequencyPattern(SecurityEvent event, Map<String, Object> patternDef) {
-        // Implementation for IP frequency analysis
-        return 0.0; // Simplified for now
+        try {
+            Integer requestsPerMinute = (Integer) patternDef.get("requestsPerMinute");
+            Integer timeWindowMinutes = (Integer) patternDef.get("timeWindowMinutes");
+
+            if (requestsPerMinute == null || timeWindowMinutes == null) {
+                return 0.0;
+            }
+
+            LocalDateTime windowStart = LocalDateTime.now().minusMinutes(timeWindowMinutes);
+            List<SecurityEvent> recentEvents = eventRepository
+                    .findByClientIpAndTimestampBetween(event.getClientIp(), windowStart, LocalDateTime.now());
+
+            double actualRate = (double) recentEvents.size() / timeWindowMinutes;
+            double expectedRate = (double) requestsPerMinute;
+
+            // Calculate confidence based on how much the actual rate exceeds expected
+            if (actualRate > expectedRate) {
+                return Math.min(1.0, (actualRate - expectedRate) / expectedRate);
+            }
+
+            return 0.0;
+
+        } catch (Exception e) {
+            log.warn("Error evaluating IP frequency pattern: {}", e.getMessage());
+            return 0.0;
+        }
     }
 
     private double evaluatePathPattern(SecurityEvent event, Map<String, Object> patternDef) {
@@ -418,26 +451,164 @@ public class ThreatAnalysisService {
         return 0.0;
     }
 
+    /**
+     * Enhanced temporal pattern evaluation
+     */
     private double evaluateTemporalPattern(SecurityEvent event, Map<String, Object> patternDef) {
-        // Implementation for temporal analysis
-        return 0.0; // Simplified for now
+        try {
+            @SuppressWarnings("unchecked")
+            List<Integer> suspiciousHours = (List<Integer>) patternDef.get("suspiciousHours");
+            if (suspiciousHours == null) return 0.0;
+
+            int currentHour = event.getTimestamp().getHour();
+
+            if (suspiciousHours.contains(currentHour)) {
+                // Check if there's unusual activity during this hour
+                LocalDateTime hourStart = event.getTimestamp().truncatedTo(ChronoUnit.HOURS);
+                LocalDateTime hourEnd = hourStart.plusHours(1);
+
+                List<SecurityEvent> hourlyEvents = eventRepository
+                        .findByClientIpAndTimestampBetween(event.getClientIp(), hourStart, hourEnd);
+
+                // More activity during suspicious hours = higher confidence
+                return Math.min(1.0, hourlyEvents.size() / 10.0);
+            }
+
+            return 0.0;
+
+        } catch (Exception e) {
+            log.warn("Error evaluating temporal pattern: {}", e.getMessage());
+            return 0.0;
+        }
     }
 
-    // Additional analysis methods
+    /**
+     * Analyze high frequency sources
+     */
     private void analyzeHighFrequencySources(LocalDateTime since) {
-        // Implementation for high frequency analysis
+        try {
+            List<Object[]> suspiciousIPs = eventRepository.findSuspiciousIPs(since, 20L);
+
+            for (Object[] ipData : suspiciousIPs) {
+                String ip = (String) ipData[0];
+                Long count = (Long) ipData[1];
+
+                // Check if alert already exists
+                Optional<ThreatAlert> existingAlert = alertRepository
+                        .findBySourceIpAndTargetRouteAndStatus(ip, null, "OPEN");
+
+                if (existingAlert.isEmpty() && count > SUSPICIOUS_IP_THRESHOLD) {
+                    ThreatAlert alert = new ThreatAlert("ANOMALY", "HIGH", "High Volume Attack Source");
+                    alert.setDescription(String.format("IP %s generated %d rejections in the last hour", ip, count));
+                    alert.setSourceIp(ip);
+                    alert.setThreatScore(Math.min(1.0, count / (double) SUSPICIOUS_IP_THRESHOLD));
+                    alert.setConfidence(0.85);
+
+                    alertRepository.save(alert);
+                    log.warn("Created high frequency source alert for IP: {} ({} events)", ip, count);
+                }
+            }
+
+        } catch (Exception e) {
+            log.error("Error analyzing high frequency sources: {}", e.getMessage(), e);
+        }
     }
 
+    /**
+     * Analyze geographic anomalies
+     */
     private void analyzeGeographicAnomalies(LocalDateTime since) {
-        // Implementation for geographic analysis
+        try {
+            // This would require IP geolocation data
+            // For now, analyze unusual IP patterns
+            List<SecurityEvent> recentEvents = eventRepository.findByTimestampBetween(since, LocalDateTime.now());
+
+            Map<String, Long> countryCount = new HashMap<>();
+            Map<String, Set<String>> countryIPs = new HashMap<>();
+
+            for (SecurityEvent event : recentEvents) {
+                String ip = event.getClientIp();
+                if (ip != null) {
+                    // Simplified: use IP prefix as "country" indicator
+                    String prefix = ip.substring(0, Math.min(ip.length(), ip.indexOf('.', ip.indexOf('.') + 1)));
+                    countryCount.merge(prefix, 1L, Long::sum);
+                    countryIPs.computeIfAbsent(prefix, k -> new HashSet<>()).add(ip);
+                }
+            }
+
+            // Look for countries with unusual activity
+            double avgActivity = countryCount.values().stream().mapToLong(Long::longValue).average().orElse(0.0);
+
+            for (Map.Entry<String, Long> entry : countryCount.entrySet()) {
+                if (entry.getValue() > avgActivity * 3) { // 3x average activity
+                    log.info("Geographic anomaly detected: {} prefix with {} events (avg: {})",
+                            entry.getKey(), entry.getValue(), avgActivity);
+                }
+            }
+
+        } catch (Exception e) {
+            log.error("Error analyzing geographic anomalies: {}", e.getMessage(), e);
+        }
     }
 
+    /**
+     * Analyze temporal patterns
+     */
     private void analyzeTemporalPatterns(LocalDateTime since) {
-        // Implementation for temporal analysis
+        try {
+            List<Object[]> hourlyData = eventRepository.getHourlyEventCounts(since);
+
+            // Calculate average requests per hour
+            double avgHourly = hourlyData.stream()
+                    .mapToLong(row -> (Long) row[1])
+                    .average()
+                    .orElse(0.0);
+
+            // Look for hours with unusual activity
+            for (Object[] hourData : hourlyData) {
+                Long count = (Long) hourData[1];
+                if (count > avgHourly * 2) { // 2x average
+                    log.info("Temporal anomaly detected: {} events in hour (avg: {})", count, avgHourly);
+
+                    // Could create alert for unusual temporal patterns
+                    // Implementation depends on specific requirements
+                }
+            }
+
+        } catch (Exception e) {
+            log.error("Error analyzing temporal patterns: {}", e.getMessage(), e);
+        }
     }
 
+    /**
+     * Update threat scores based on recent activity
+     */
     private void updateThreatScores() {
-        // Implementation for threat score updates
+        try {
+            LocalDateTime since = LocalDateTime.now().minusHours(24);
+            List<ThreatAlert> openAlerts = alertRepository.findByStatusOrderByCreatedAtDesc("OPEN");
+
+            for (ThreatAlert alert : openAlerts) {
+                if (alert.getSourceIp() != null) {
+                    // Count recent events from this IP
+                    List<SecurityEvent> recentEvents = eventRepository
+                            .findByClientIpAndTimestampBetween(alert.getSourceIp(), since, LocalDateTime.now());
+
+                    long rejections = recentEvents.stream()
+                            .filter(e -> "REJECTION".equals(e.getEventType()))
+                            .count();
+
+                    // Update threat score based on recent activity
+                    if (rejections > 50) {
+                        alert.setThreatScore(Math.min(1.0, alert.getThreatScore() + 0.1));
+                        alertRepository.save(alert);
+                    }
+                }
+            }
+
+        } catch (Exception e) {
+            log.error("Error updating threat scores: {}", e.getMessage(), e);
+        }
     }
 
     private Map<String, Object> getSuspiciousActivityStats(LocalDateTime since) {
@@ -448,15 +619,85 @@ public class ThreatAnalysisService {
         return stats;
     }
 
+    /**
+     * Analyze traffic volume trends for recommendations
+     */
     private void analyzeTrafficVolumeTrends(List<Map<String, Object>> recommendations, LocalDateTime since) {
-        // Implementation for traffic volume analysis
+        try {
+            List<Object[]> hourlyData = eventRepository.getHourlyEventCounts(since);
+
+            if (hourlyData.size() >= 2) {
+                // Compare recent hours
+                Long recentHour = (Long) hourlyData.get(hourlyData.size() - 1)[1];
+                Long previousHour = (Long) hourlyData.get(hourlyData.size() - 2)[1];
+
+                if (recentHour > previousHour * 1.5) { // 50% increase
+                    Map<String, Object> recommendation = new HashMap<>();
+                    recommendation.put("type", "TRAFFIC_SPIKE");
+                    recommendation.put("priority", "MEDIUM");
+                    recommendation.put("title", "Unusual traffic spike detected");
+                    recommendation.put("description", String.format("Traffic increased from %d to %d requests per hour", previousHour, recentHour));
+                    recommendations.add(recommendation);
+                }
+            }
+
+        } catch (Exception e) {
+            log.warn("Error analyzing traffic volume trends: {}", e.getMessage());
+        }
     }
 
+    /**
+     * Analyze pattern effectiveness for recommendations
+     */
     private void analyzePatternEffectiveness(List<Map<String, Object>> recommendations) {
-        // Implementation for pattern effectiveness analysis
+        try {
+            LocalDateTime since = LocalDateTime.now().minusDays(7);
+            List<ThreatPattern> patterns = patternRepository.findRecentlyTriggeredPatterns(since);
+
+            // Find patterns with high false positive rates
+            for (ThreatPattern pattern : patterns) {
+                if (pattern.getTriggerCount() > 0) {
+                    double falsePositiveRate = (double) pattern.getFalsePositiveCount() / pattern.getTriggerCount();
+
+                    if (falsePositiveRate > 0.3) { // 30% false positive rate
+                        Map<String, Object> recommendation = new HashMap<>();
+                        recommendation.put("type", "PATTERN_TUNING");
+                        recommendation.put("priority", "LOW");
+                        recommendation.put("title", "Pattern needs tuning: " + pattern.getPatternName());
+                        recommendation.put("description", String.format("Pattern has %.1f%% false positive rate", falsePositiveRate * 100));
+                        recommendations.add(recommendation);
+                    }
+                }
+            }
+
+        } catch (Exception e) {
+            log.warn("Error analyzing pattern effectiveness: {}", e.getMessage());
+        }
     }
 
+    /**
+     * Analyze response time anomalies for recommendations
+     */
     private void analyzeResponseTimeAnomalies(List<Map<String, Object>> recommendations, LocalDateTime since) {
-        // Implementation for response time analysis
+        try {
+            List<Object[]> avgResponseTimes = eventRepository.getAverageResponseTimeByRoute(since);
+
+            for (Object[] routeData : avgResponseTimes) {
+                String routeId = (String) routeData[0];
+                Double avgResponseTime = (Double) routeData[1];
+
+                if (avgResponseTime != null && avgResponseTime > 5000) { // 5 seconds
+                    Map<String, Object> recommendation = new HashMap<>();
+                    recommendation.put("type", "PERFORMANCE");
+                    recommendation.put("priority", "MEDIUM");
+                    recommendation.put("title", "Slow response time detected");
+                    recommendation.put("description", String.format("Route %s has average response time of %.1f ms", routeId, avgResponseTime));
+                    recommendations.add(recommendation);
+                }
+            }
+
+        } catch (Exception e) {
+            log.warn("Error analyzing response time anomalies: {}", e.getMessage());
+        }
     }
 }
