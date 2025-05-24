@@ -378,6 +378,47 @@ public class AlertingService {
         log.info("Alert subscriber removed: {}", subscriber.getName());
     }
 
+    /**
+     * Get alert escalation recommendations
+     */
+    public List<Map<String, Object>> getEscalationRecommendations() {
+        List<Map<String, Object>> recommendations = new ArrayList<>();
+
+        try {
+            List<ThreatAlert> openAlerts = alertRepository.findByStatusOrderByCreatedAtDesc("OPEN");
+
+            for (ThreatAlert alert : openAlerts) {
+                long hoursSinceCreated = java.time.Duration.between(alert.getCreatedAt(), LocalDateTime.now()).toHours();
+
+                Map<String, Object> recommendation = new HashMap<>();
+                recommendation.put("alertId", alert.getId());
+                recommendation.put("title", alert.getTitle());
+                recommendation.put("severity", alert.getSeverity());
+                recommendation.put("hoursSinceCreated", hoursSinceCreated);
+
+                // Escalation logic
+                if ("CRITICAL".equals(alert.getSeverity()) && hoursSinceCreated > 1) {
+                    recommendation.put("escalationLevel", "IMMEDIATE");
+                    recommendation.put("reason", "Critical alert open for more than 1 hour");
+                    recommendations.add(recommendation);
+                } else if ("HIGH".equals(alert.getSeverity()) && hoursSinceCreated > 4) {
+                    recommendation.put("escalationLevel", "HIGH");
+                    recommendation.put("reason", "High severity alert open for more than 4 hours");
+                    recommendations.add(recommendation);
+                } else if (hoursSinceCreated > 24) {
+                    recommendation.put("escalationLevel", "STALE");
+                    recommendation.put("reason", "Alert has been open for more than 24 hours");
+                    recommendations.add(recommendation);
+                }
+            }
+
+        } catch (Exception e) {
+            log.error("Error generating escalation recommendations: {}", e.getMessage(), e);
+        }
+
+        return recommendations;
+    }
+
     // Private helper methods
 
     private void initializeDefaultSubscribers() {
@@ -746,4 +787,21 @@ public class AlertingService {
             this.lastUpdate = LocalDateTime.now();
         }
 
-        public ThreatAlert getAlert
+        public ThreatAlert getAlert() {
+            return alert;
+        }
+
+        public LocalDateTime getLastUpdate() {
+            return lastUpdate;
+        }
+    }
+
+    /**
+     * Interface for alert subscribers to receive notifications
+     */
+    public interface AlertSubscriber {
+        void onAlertTriggered(ThreatAlert alert);
+        void onAlertStatusChanged(ThreatAlert alert, String oldStatus, String newStatus);
+        String getName();
+    }
+}
