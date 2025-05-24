@@ -1,7 +1,6 @@
 // demo 2/src/main/java/com/example/demo/Filter/RequestCountFilter.java
 package com.example.demo.Filter;
 
-import com.example.demo.Service.AnalyticsService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
