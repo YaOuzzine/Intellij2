@@ -10,41 +10,72 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173, // Frontend port
+    port: 5173,
     proxy: {
-      // Proxy requests to /api/auth/** to the gateway (demo 2)
-      '/api/auth': {
-        target: 'http://localhost:9080', // Gateway (demo 2) port
+      // Analytics and metrics to demo 2 service
+      '/api/analytics': {
+        target: 'http://localhost:9080',
         changeOrigin: true,
         secure: false,
         configure: (proxy, _options) => {
           proxy.on('error', (err, _req, _res) => {
-            console.log('proxy error', err);
+            console.log('analytics proxy error', err);
           });
           proxy.on('proxyReq', (proxyReq, req, _res) => {
-            console.log('Sending Request:', req.method, req.url);
+            console.log('Sending Analytics Request:', req.method, req.url);
           });
           proxy.on('proxyRes', (proxyRes, req, _res) => {
-            console.log('Received Response:', proxyRes.statusCode, req.url);
+            console.log('Received Analytics Response:', proxyRes.statusCode, req.url);
           });
         }
       },
-      // Proxy other /api/** requests (user profile, routes, etc.) to the admin service (gateway-admin)
-      '/api': {
-        target: 'http://localhost:8081', // Admin service (gateway-admin) port
+      '/api/metrics': {
+        target: 'http://localhost:9080',
         changeOrigin: true,
         secure: false,
         configure: (proxy, _options) => {
           proxy.on('error', (err, _req, _res) => {
-            console.log('proxy error', err);
+            console.log('metrics proxy error', err);
           });
           proxy.on('proxyReq', (proxyReq, req, _res) => {
-            console.log('Sending Request to admin:', req.method, req.url);
-            // Log headers being sent to the backend
-            console.log('Headers:', JSON.stringify(req.headers));
+            console.log('Sending Metrics Request:', req.method, req.url);
           });
           proxy.on('proxyRes', (proxyRes, req, _res) => {
-            console.log('Received Response from admin:', proxyRes.statusCode, req.url);
+            console.log('Received Metrics Response:', proxyRes.statusCode, req.url);
+          });
+        }
+      },
+      // Auth to demo 2 service (gateway)
+      '/api/auth': {
+        target: 'http://localhost:9080',
+        changeOrigin: true,
+        secure: false,
+        configure: (proxy, _options) => {
+          proxy.on('error', (err, _req, _res) => {
+            console.log('auth proxy error', err);
+          });
+          proxy.on('proxyReq', (proxyReq, req, _res) => {
+            console.log('Sending Auth Request:', req.method, req.url);
+          });
+          proxy.on('proxyRes', (proxyRes, req, _res) => {
+            console.log('Received Auth Response:', proxyRes.statusCode, req.url);
+          });
+        }
+      },
+      // All other admin APIs to gateway-admin service
+      '/api': {
+        target: 'http://localhost:8081',
+        changeOrigin: true,
+        secure: false,
+        configure: (proxy, _options) => {
+          proxy.on('error', (err, _req, _res) => {
+            console.log('admin proxy error', err);
+          });
+          proxy.on('proxyReq', (proxyReq, req, _res) => {
+            console.log('Sending Admin Request:', req.method, req.url);
+          });
+          proxy.on('proxyRes', (proxyRes, req, _res) => {
+            console.log('Received Admin Response:', proxyRes.statusCode, req.url);
           });
         }
       },
