@@ -20,7 +20,9 @@ import {
     Tab,
     Divider,
     useTheme,
-    useMediaQuery
+    useMediaQuery,
+    Alert,
+    AlertTitle
 } from '@mui/material';
 import { styled, alpha, keyframes } from '@mui/material/styles';
 import {
@@ -184,10 +186,8 @@ const AnalyticsPage = () => {
     // State for tab selection
     const [tabValue, setTabValue] = useState(0);
 
-    // State for all route data - this will always contain data for all routes
-    const [allRouteData, setAllRouteData] = useState({});
-
-    // State for aggregated/filtered data
+    // State for analytics data
+    const [dashboardData, setDashboardData] = useState(null);
     const [displayMetrics, setDisplayMetrics] = useState({
         totalRequests: 0,
         totalRejected: 0,
@@ -198,22 +198,20 @@ const AnalyticsPage = () => {
         previousMinuteRejected: 0,
     });
 
-    // Time series data
+    // Time series and chart data
     const [timeSeriesData, setTimeSeriesData] = useState([]);
     const [rejectionData, setRejectionData] = useState([]);
     const [routeDistribution, setRouteDistribution] = useState([]);
     const [responseTimeData, setResponseTimeData] = useState([]);
 
-    // State for time range and other filters
+    // State for filters and controls
     const [timeRange, setTimeRange] = useState('1h');
     const [selectedRoute, setSelectedRoute] = useState('all');
     const [routes, setRoutes] = useState([]);
 
-    // Loading state
+    // Loading and error states
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
-
-    // State for error handling
     const [error, setError] = useState(null);
 
     // Handle tab change
@@ -237,314 +235,129 @@ const AnalyticsPage = () => {
         const interval = setInterval(() => {
             fetchAllData(false)
                 .catch(err => console.error("Error in automatic refresh:", err));
-        }, 10000); // Update every 10 seconds
+        }, 30000); // Update every 30 seconds
 
         return () => clearInterval(interval);
-    }, [timeRange]); // Remove selectedRoute dependency
+    }, [timeRange, selectedRoute]);
 
-    // Process data when selectedRoute changes
-    useEffect(() => {
-        processDataForSelectedRoute();
-    }, [selectedRoute, allRouteData]);
-
-    // Fetch all data for all routes
+    // Fetch comprehensive analytics data
     const fetchAllData = async (showLoading = true) => {
         if (showLoading) setLoading(true);
         setRefreshing(true);
 
         try {
-            console.log("[Analytics] Fetching all route data...");
+            console.log("[Analytics] Fetching comprehensive analytics data...");
 
-            // Always fetch data for all routes (no filtering on backend)
-            const [routesResponse] = await Promise.all([
-                apiClient.get('/gateway-routes') // Get route definitions
-            ]);
+            // First, try to get enhanced dashboard data from new analytics service
+            let dashboardResponse;
+            try {
+                dashboardResponse = await apiClient.get('/analytics/dashboard');
+                console.log("[Analytics] Enhanced dashboard data fetched:", dashboardResponse.data);
+                setDashboardData(dashboardResponse.data);
 
-            // Process routes for the dropdown
-            const fetchedAdminRoutes = routesResponse.data;
-            const routeDataForDropdown = fetchedAdminRoutes.map(adminRoute => {
-                const analyticsServiceRouteId = adminRoute.routeId && adminRoute.routeId.trim() !== ''
-                    ? adminRoute.routeId
-                    : `route-${adminRoute.id}`;
-                return {
-                    id: adminRoute.id,
-                    label: adminRoute.predicates || analyticsServiceRouteId,
-                    value: analyticsServiceRouteId,
-                    adminRoute: adminRoute
-                };
-            });
-            setRoutes([{ id: 'all', label: 'All Routes', value: 'all' }, ...routeDataForDropdown]);
-            console.log("[Analytics] Routes loaded:", routeDataForDropdown);
+                // Extract metrics from enhanced dashboard
+                if (dashboardResponse.data.globalMetrics) {
+                    const globalMetrics = dashboardResponse.data.globalMetrics;
+                    setDisplayMetrics({
+                        totalRequests: globalMetrics.totalRequests || 0,
+                        totalRejected: globalMetrics.totalRejections || 0,
+                        acceptanceRate: globalMetrics.totalRequests > 0
+                            ? Math.round(((globalMetrics.totalRequests - globalMetrics.totalRejections) / globalMetrics.totalRequests) * 100)
+                            : 100,
+                        currentMinuteRequests: globalMetrics.currentMinuteRequests || 0,
+                        previousMinuteRequests: globalMetrics.previousMinuteRequests || 0,
+                        currentMinuteRejected: globalMetrics.currentMinuteRejections || 0,
+                        previousMinuteRejected: globalMetrics.previousMinuteRejections || 0,
+                    });
+                }
 
-            // Fetch metrics for each individual route + global metrics
-            const routeMetricsPromises = [
-                // Global metrics (no routeId parameter)
-                {
-                    routeId: 'all',
-                    requests: apiClient.get('/metrics/requests'),
-                    minutely: apiClient.get('/metrics/minutely'),
-                    rejections: apiClient.get('/metrics/rejections'),
-                    timeseries: apiClient.get(`/metrics/timeseries?timeRange=${timeRange}`)
-                },
-                // Individual route metrics
-                ...routeDataForDropdown.map(route => ({
-                    routeId: route.value,
-                    requests: apiClient.get(`/metrics/requests?routeId=${route.value}`),
-                    minutely: apiClient.get(`/metrics/minutely?routeId=${route.value}`),
-                    rejections: apiClient.get(`/metrics/rejections?routeId=${route.value}`),
-                    timeseries: apiClient.get(`/metrics/timeseries?timeRange=${timeRange}&routeId=${route.value}`)
-                }))
-            ];
+                // Extract route data for dropdown
+                if (dashboardResponse.data.routeAnalytics) {
+                    const routeAnalytics = dashboardResponse.data.routeAnalytics;
+                    const routeOptions = [
+                        { id: 'all', label: 'All Routes', value: 'all' },
+                        ...routeAnalytics.map(route => ({
+                            id: route.routeId,
+                            label: route.routeId,
+                            value: route.routeId
+                        }))
+                    ];
+                    setRoutes(routeOptions);
 
-            console.log("[Analytics] Fetching metrics for", routeMetricsPromises.length, "routes/global");
+                    // Process route distribution for charts
+                    const distribution = routeAnalytics
+                        .filter(route => route.totalRequests > 0)
+                        .map((route, index) => ({
+                            id: route.routeId,
+                            name: route.routeId,
+                            requests: route.totalRequests,
+                            rejected: route.totalRejections,
+                            avgResponseTime: route.averageResponseTime || 0,
+                            color: COLORS[index % COLORS.length]
+                        }));
+                    setRouteDistribution(distribution);
+                }
 
-            // Fetch all metrics in parallel
-            const allMetrics = await Promise.all(
-                routeMetricsPromises.map(async (routePromises) => {
-                    try {
-                        const [requests, minutely, rejections, timeseries] = await Promise.all([
-                            routePromises.requests,
-                            routePromises.minutely,
-                            routePromises.rejections,
-                            routePromises.timeseries
-                        ]);
+            } catch (enhancedError) {
+                console.warn("[Analytics] Enhanced analytics not available, falling back to basic metrics:", enhancedError.message);
 
-                        return {
-                            routeId: routePromises.routeId,
-                            requests: requests.data,
-                            minutely: minutely.data,
-                            rejections: rejections.data,
-                            timeseries: timeseries.data.timeSeries
-                        };
-                    } catch (error) {
-                        console.error(`[Analytics] Error fetching data for route ${routePromises.routeId}:`, error);
-                        return {
-                            routeId: routePromises.routeId,
-                            requests: { requestCount: 0, rejectedCount: 0 },
-                            minutely: { requestsCurrentMinute: 0, requestsPreviousMinute: 0, rejectedCurrentMinute: 0, rejectedPreviousMinute: 0 },
-                            rejections: { rejectionReasons: {} },
-                            timeseries: []
-                        };
-                    }
-                })
-            );
+                // Fallback to basic metrics endpoints
+                const [requestsResponse, minutelyResponse, rejectionsResponse, timeseriesResponse] = await Promise.all([
+                    apiClient.get(`/metrics/requests${selectedRoute !== 'all' ? `?routeId=${selectedRoute}` : ''}`),
+                    apiClient.get(`/metrics/minutely${selectedRoute !== 'all' ? `?routeId=${selectedRoute}` : ''}`),
+                    apiClient.get(`/metrics/rejections${selectedRoute !== 'all' ? `?routeId=${selectedRoute}` : ''}`),
+                    apiClient.get(`/metrics/timeseries?timeRange=${timeRange}${selectedRoute !== 'all' ? `&routeId=${selectedRoute}` : ''}`)
+                ]);
 
-            // Convert to route data object
-            const routeDataMap = {};
-            allMetrics.forEach(routeData => {
-                routeDataMap[routeData.routeId] = routeData;
-                console.log(`[Analytics] Route ${routeData.routeId}:`, {
-                    requests: routeData.requests.requestCount,
-                    rejected: routeData.requests.rejectedCount,
-                    timeseriesPoints: routeData.timeseries.length
+                // Process basic metrics
+                const requests = requestsResponse.data;
+                const minutely = minutelyResponse.data;
+                const rejections = rejectionsResponse.data;
+                const timeseries = timeseriesResponse.data;
+
+                setDisplayMetrics({
+                    totalRequests: requests.requestCount || 0,
+                    totalRejected: requests.rejectedCount || 0,
+                    acceptanceRate: requests.requestCount > 0
+                        ? Math.round(((requests.requestCount - requests.rejectedCount) / requests.requestCount) * 100)
+                        : 100,
+                    currentMinuteRequests: minutely.requestsCurrentMinute || 0,
+                    previousMinuteRequests: minutely.requestsPreviousMinute || 0,
+                    currentMinuteRejected: minutely.rejectedCurrentMinute || 0,
+                    previousMinuteRejected: minutely.rejectedPreviousMinute || 0,
                 });
-            });
 
-            setAllRouteData(routeDataMap);
-            console.log("[Analytics] All route data updated:", Object.keys(routeDataMap));
+                // Process rejection data
+                const rejectionReasons = rejections.rejectionReasons || {};
+                setRejectionData(Object.entries(rejectionReasons).map(([name, value]) => ({ name, value })));
+
+                // Process time series data
+                setTimeSeriesData(timeseries.timeSeries || []);
+                setResponseTimeData((timeseries.timeSeries || []).map(point => ({
+                    time: point.time,
+                    avg: point.avgResponseTime || 0,
+                    p95: 0
+                })));
+
+                // Set basic routes if not set
+                if (routes.length === 0) {
+                    setRoutes([{ id: 'all', label: 'All Routes', value: 'all' }]);
+                }
+            }
 
         } catch (error) {
-            console.error('[Analytics] Error fetching metrics:', error);
-            throw error;
+            console.error('[Analytics] Error fetching analytics data:', error);
+            setError(error.response?.data?.message || error.message || 'Failed to fetch analytics data');
         } finally {
             if (showLoading) setLoading(false);
             setRefreshing(false);
         }
     };
 
-    // Process data based on selected route
-    const processDataForSelectedRoute = () => {
-        if (!allRouteData || Object.keys(allRouteData).length === 0) {
-            console.log("[Analytics] No route data available for processing");
-            return;
-        }
-
-        console.log(`[Analytics] Processing data for selected route: ${selectedRoute}`);
-        console.log("[Analytics] Available route data keys:", Object.keys(allRouteData));
-
-        if (selectedRoute === 'all') {
-            // Aggregate data from all individual routes (exclude the 'all' entry to avoid double counting)
-            const individualRoutes = Object.keys(allRouteData).filter(routeId => routeId !== 'all');
-            console.log("[Analytics] Aggregating data from individual routes:", individualRoutes);
-
-            if (individualRoutes.length === 0) {
-                // Fallback to global data if no individual routes
-                console.log("[Analytics] No individual route data, using global data");
-                const globalData = allRouteData['all'];
-                if (globalData) {
-                    processRouteData(globalData, true);
-                }
-                return;
-            }
-
-            // Aggregate metrics from individual routes
-            let aggregatedRequests = 0;
-            let aggregatedRejected = 0;
-            let aggregatedCurrentMinute = 0;
-            let aggregatedPreviousMinute = 0;
-            let aggregatedCurrentRejected = 0;
-            let aggregatedPreviousRejected = 0;
-
-            const allTimeSeriesData = [];
-            const allRejectionReasons = {};
-            const allRouteDistribution = [];
-
-            individualRoutes.forEach(routeId => {
-                const routeData = allRouteData[routeId];
-                if (routeData && routeData.requests) {
-                    aggregatedRequests += routeData.requests.requestCount || 0;
-                    aggregatedRejected += routeData.requests.rejectedCount || 0;
-                    aggregatedCurrentMinute += routeData.minutely.requestsCurrentMinute || 0;
-                    aggregatedPreviousMinute += routeData.minutely.requestsPreviousMinute || 0;
-                    aggregatedCurrentRejected += routeData.minutely.rejectedCurrentMinute || 0;
-                    aggregatedPreviousRejected += routeData.minutely.rejectedPreviousMinute || 0;
-
-                    // Aggregate rejection reasons
-                    Object.entries(routeData.rejections.rejectionReasons || {}).forEach(([reason, count]) => {
-                        allRejectionReasons[reason] = (allRejectionReasons[reason] || 0) + count;
-                    });
-
-                    // Add to route distribution
-                    const routeInfo = routes.find(r => r.value === routeId);
-                    if (routeInfo && (routeData.requests.requestCount > 0 || routeData.requests.rejectedCount > 0)) {
-                        allRouteDistribution.push({
-                            id: routeInfo.id,
-                            name: routeInfo.label,
-                            requests: routeData.requests.requestCount,
-                            rejected: routeData.requests.rejectedCount,
-                            avgResponseTime: 0, // Could aggregate this too if needed
-                            color: COLORS[allRouteDistribution.length % COLORS.length]
-                        });
-                    }
-                }
-            });
-
-            // Merge time series data (this is more complex - for now, use global timeseries if available)
-            const globalTimeseriesData = allRouteData['all']?.timeseries || [];
-
-            // Set aggregated data
-            const acceptanceRate = aggregatedRequests > 0
-                ? Math.round(((aggregatedRequests - aggregatedRejected) / aggregatedRequests) * 100)
-                : 100;
-
-            setDisplayMetrics({
-                totalRequests: aggregatedRequests,
-                totalRejected: aggregatedRejected,
-                acceptanceRate,
-                currentMinuteRequests: aggregatedCurrentMinute,
-                previousMinuteRequests: aggregatedPreviousMinute,
-                currentMinuteRejected: aggregatedCurrentRejected,
-                previousMinuteRejected: aggregatedPreviousRejected,
-            });
-
-            setTimeSeriesData(globalTimeseriesData);
-            setRejectionData(Object.entries(allRejectionReasons).map(([name, value]) => ({ name, value })));
-            setRouteDistribution(allRouteDistribution.sort((a, b) => b.requests - a.requests));
-            setResponseTimeData(globalTimeseriesData.map(point => ({
-                time: point.time,
-                avg: point.avgResponseTime || 0,
-                p95: 0
-            })));
-
-            console.log("[Analytics] Aggregated data processed:", {
-                totalRequests: aggregatedRequests,
-                totalRejected: aggregatedRejected,
-                routeCount: allRouteDistribution.length
-            });
-
-        } else {
-            // Show data for specific route
-            const routeData = allRouteData[selectedRoute];
-            console.log(`[Analytics] Using data for specific route ${selectedRoute}:`, routeData);
-
-            if (routeData) {
-                processRouteData(routeData, false);
-            } else {
-                console.warn(`[Analytics] No data found for route: ${selectedRoute}`);
-                // Set empty data
-                setDisplayMetrics({
-                    totalRequests: 0,
-                    totalRejected: 0,
-                    acceptanceRate: 100,
-                    currentMinuteRequests: 0,
-                    previousMinuteRequests: 0,
-                    currentMinuteRejected: 0,
-                    previousMinuteRejected: 0,
-                });
-                setTimeSeriesData([]);
-                setRejectionData([]);
-                setRouteDistribution([]);
-                setResponseTimeData([]);
-            }
-        }
-    };
-
-    // Helper function to process individual route data
-    const processRouteData = (routeData, isGlobal) => {
-        const { requestCount, rejectedCount } = routeData.requests;
-        const {
-            requestsCurrentMinute,
-            requestsPreviousMinute,
-            rejectedCurrentMinute,
-            rejectedPreviousMinute
-        } = routeData.minutely;
-
-        const acceptanceRate = requestCount > 0
-            ? Math.round(((requestCount - rejectedCount) / requestCount) * 100)
-            : 100;
-
-        setDisplayMetrics({
-            totalRequests: requestCount,
-            totalRejected: rejectedCount,
-            acceptanceRate,
-            currentMinuteRequests: requestsCurrentMinute,
-            previousMinuteRequests: requestsPreviousMinute,
-            currentMinuteRejected: rejectedCurrentMinute,
-            previousMinuteRejected: rejectedPreviousMinute,
-        });
-
-        setTimeSeriesData(routeData.timeseries);
-        setRejectionData(Object.entries(routeData.rejections.rejectionReasons || {}).map(([name, value]) => ({ name, value })));
-
-        // For single route, show just that route in distribution
-        if (!isGlobal) {
-            const routeInfo = routes.find(r => r.value === selectedRoute);
-            if (routeInfo) {
-                setRouteDistribution([{
-                    id: routeInfo.id,
-                    name: routeInfo.label,
-                    requests: requestCount,
-                    rejected: rejectedCount,
-                    avgResponseTime: 0,
-                    color: COLORS[0]
-                }]);
-            }
-        }
-
-        setResponseTimeData(routeData.timeseries.map(point => ({
-            time: point.time,
-            avg: point.avgResponseTime || 0,
-            p95: 0
-        })));
-
-        console.log(`[Analytics] Processed ${isGlobal ? 'global' : 'route-specific'} data:`, {
-            requests: requestCount,
-            rejected: rejectedCount,
-            timeseriesPoints: routeData.timeseries.length
-        });
-    };
-
     // Handle manual refresh
     const handleRefresh = () => {
-        fetchAllData(true)
-            .catch(err => {
-                console.error("Error during refresh:", err);
-                if (err.response?.status === 401) {
-                    setError("Authentication error. Please log in again.");
-                } else {
-                    setError("Failed to load analytics data. Please try again later.");
-                }
-            });
+        setError(null);
+        fetchAllData(true);
     };
 
     // Handle time range change
@@ -587,6 +400,7 @@ const AnalyticsPage = () => {
         return (
             <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' }}>
                 <CircularProgress />
+                <Typography variant="h6" sx={{ ml: 2 }}>Loading Enhanced Analytics...</Typography>
             </Box>
         );
     }
@@ -595,31 +409,13 @@ const AnalyticsPage = () => {
     if (error) {
         return (
             <Box sx={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '80vh', p: 3 }}>
-                <Paper sx={{ p: 4, maxWidth: 500, textAlign: 'center', borderRadius: 2 }}>
-                    <ErrorOutlineIcon sx={{ fontSize: 60, color: '#f44336', mb: 2 }} />
-                    <Typography variant="h5" gutterBottom>
-                        Unable to Load Analytics
-                    </Typography>
-                    <Typography variant="body1" color="text.secondary" paragraph>
-                        {error}
-                    </Typography>
-                    <Button
-                        variant="contained"
-                        onClick={() => {
-                            setError(null);
-                            fetchAllData().catch(err => {
-                                console.error("Error retry:", err);
-                                if (err.response?.status === 401) {
-                                    setError("Authentication error. Please log in again.");
-                                } else {
-                                    setError("Failed to load analytics data. Please try again later.");
-                                }
-                            });
-                        }}
-                    >
-                        Try Again
-                    </Button>
-                </Paper>
+                <Alert severity="error" sx={{ mb: 2, maxWidth: 600 }}>
+                    <AlertTitle>Unable to Load Analytics</AlertTitle>
+                    {error}
+                </Alert>
+                <Button variant="contained" onClick={handleRefresh}>
+                    Try Again
+                </Button>
             </Box>
         );
     }
@@ -630,11 +426,14 @@ const AnalyticsPage = () => {
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4, flexWrap: 'wrap', gap: 2 }}>
                 <Box>
                     <Typography variant="h4" component="h1" sx={{ fontWeight: 700, color: 'primary.main' }}>
-                        Traffic Analytics
+                        Enhanced Traffic Analytics
                     </Typography>
-                    {selectedRoute !== 'all' && (
-                        <Typography variant="subtitle1" color="text.secondary" sx={{ mt: 1 }}>
-                            Showing data for: <strong>{getSelectedRouteDisplayName()}</strong>
+                    <Typography variant="subtitle1" color="text.secondary" sx={{ mt: 1 }}>
+                        {selectedRoute !== 'all' ? `Showing data for: ${getSelectedRouteDisplayName()}` : 'Real-time security and performance insights'}
+                    </Typography>
+                    {dashboardData?.analyticsVersion && (
+                        <Typography variant="caption" color="text.secondary">
+                            Powered by {dashboardData.analyticsVersion}
                         </Typography>
                     )}
                 </Box>
@@ -691,6 +490,19 @@ const AnalyticsPage = () => {
                     <SyncButton />
                 </Box>
             </Box>
+
+            {/* AI Security Health Score */}
+            {dashboardData?.securityHealthScore !== undefined && (
+                <Alert
+                    severity={dashboardData.securityHealthScore > 80 ? "success" : dashboardData.securityHealthScore > 60 ? "warning" : "error"}
+                    sx={{ mb: 3 }}
+                >
+                    <AlertTitle>Security Health Score: {dashboardData.securityHealthScore.toFixed(1)}/100</AlertTitle>
+                    {dashboardData.securityHealthScore > 80 ? "Your system security is excellent!" :
+                        dashboardData.securityHealthScore > 60 ? "Security status is good but could be improved." :
+                            "Security attention required - consider reviewing threat analysis."}
+                </Alert>
+            )}
 
             {/* Overview metrics cards */}
             <Grid container spacing={3} sx={{ mb: 4 }}>
@@ -1078,6 +890,25 @@ const AnalyticsPage = () => {
                     </Box>
                 </TabPanel>
             </ChartContainer>
+
+            {/* AI Insights Panel */}
+            {dashboardData?.aiSecurityInsights && (
+                <Box sx={{ mt: 3 }}>
+                    <Typography variant="h5" sx={{ mb: 2, fontWeight: 600 }}>
+                        AI Security Insights
+                    </Typography>
+                    <Grid container spacing={2}>
+                        {dashboardData.aiSecurityInsights.aiRecommendations?.slice(0, 3).map((recommendation, index) => (
+                            <Grid item xs={12} md={4} key={index}>
+                                <Alert severity={recommendation.priority === 'HIGH' ? 'error' : recommendation.priority === 'MEDIUM' ? 'warning' : 'info'}>
+                                    <AlertTitle>{recommendation.title}</AlertTitle>
+                                    {recommendation.description}
+                                </Alert>
+                            </Grid>
+                        ))}
+                    </Grid>
+                </Box>
+            )}
         </Box>
     );
 };

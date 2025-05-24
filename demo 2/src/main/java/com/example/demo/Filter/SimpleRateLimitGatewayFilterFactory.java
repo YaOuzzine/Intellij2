@@ -4,6 +4,7 @@ import com.example.demo.Db.IpUtils;
 import com.example.demo.Entity.GatewayRoute;
 import com.example.demo.Entity.RateLimit;
 import com.example.demo.Repository.GatewayRouteRepository;
+import com.example.demo.Service.AnalyticsService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cloud.gateway.filter.GatewayFilter;
@@ -22,17 +23,17 @@ import java.util.concurrent.ConcurrentHashMap;
 public class SimpleRateLimitGatewayFilterFactory extends AbstractGatewayFilterFactory<Void> {
 
     private final GatewayRouteRepository gatewayRouteRepository;
-    private final RateLimitMetricsService rateLimitMetricsService;
+    private final AnalyticsService analyticsService;
 
     // In-memory tracker for client requests
     private final Map<String, RequestTracker> requestMap = new ConcurrentHashMap<>();
 
     @Autowired
     public SimpleRateLimitGatewayFilterFactory(GatewayRouteRepository gatewayRouteRepository,
-                                               RateLimitMetricsService rateLimitMetricsService) {
+                                               AnalyticsService analyticsService) {
         super(Void.class);
         this.gatewayRouteRepository = gatewayRouteRepository;
-        this.rateLimitMetricsService = rateLimitMetricsService;
+        this.analyticsService = analyticsService;
     }
 
     @Override
@@ -80,8 +81,13 @@ public class SimpleRateLimitGatewayFilterFactory extends AbstractGatewayFilterFa
 
             log.info("Matching route found: {}", routeId);
 
-            // Record the request in metrics service
-            rateLimitMetricsService.recordRequest(routeId);
+            // Record the request in analytics service
+            try {
+                analyticsService.recordRequest(routeId);
+                log.debug("Recorded request in analytics for route: {}", routeId);
+            } catch (Exception e) {
+                log.warn("Failed to record request in analytics: {}", e.getMessage());
+            }
 
             // Skip rate limiting if not enabled for this route
             if (matchingRoute.getWithRateLimit() == null || !matchingRoute.getWithRateLimit()) {
@@ -126,8 +132,13 @@ public class SimpleRateLimitGatewayFilterFactory extends AbstractGatewayFilterFa
                     log.warn("Rate limit exceeded for clientIp={} on routeId={}",
                             clientIp, routeId);
 
-                    // Record the rejection in metrics service
-                    rateLimitMetricsService.recordRejection(routeId);
+                    // Record the rejection in analytics service
+                    try {
+                        analyticsService.recordRejection(routeId, "Rate Limit");
+                        log.debug("Recorded rate limit rejection in analytics for route: {}", routeId);
+                    } catch (Exception e) {
+                        log.warn("Failed to record rejection in analytics: {}", e.getMessage());
+                    }
 
                     exchange.getResponse().setStatusCode(HttpStatus.TOO_MANY_REQUESTS);
                     return exchange.getResponse().setComplete();

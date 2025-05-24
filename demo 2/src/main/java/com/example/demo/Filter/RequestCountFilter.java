@@ -1,6 +1,7 @@
 // demo 2/src/main/java/com/example/demo/Filter/RequestCountFilter.java
 package com.example.demo.Filter;
 
+import com.example.demo.Service.AnalyticsService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -46,8 +47,8 @@ public class RequestCountFilter implements WebFilter {
         log.info("[RequestCountFilter] ========== PROCESSING REQUEST: {} ==========", path);
 
         // Skip metrics endpoints that are served directly by this service
-        if (path.startsWith("/api/metrics")) {
-            log.trace("[RequestCountFilter] Skipping metrics endpoint: {}", path);
+        if (path.startsWith("/api/metrics") || path.startsWith("/api/analytics")) {
+            log.trace("[RequestCountFilter] Skipping analytics endpoint: {}", path);
             return chain.filter(exchange);
         }
 
@@ -64,24 +65,24 @@ public class RequestCountFilter implements WebFilter {
         long startTime = System.currentTimeMillis();
 
         // DETAILED LOGGING: Check all exchange attributes to see what's available
-        log.info("[RequestCountFilter] 🔍 ALL EXCHANGE ATTRIBUTES:");
+        log.debug("[RequestCountFilter] 🔍 ALL EXCHANGE ATTRIBUTES:");
         exchange.getAttributes().forEach((key, value) -> {
-            log.info("[RequestCountFilter] 🔍   {} = {}", key, value);
+            log.debug("[RequestCountFilter] 🔍   {} = {}", key, value);
         });
 
         // Try to get the gateway route - this will only be present for requests going through gateway routing
         Route gatewayRoute = exchange.getAttribute(ServerWebExchangeUtils.GATEWAY_ROUTE_ATTR);
 
-        log.info("[RequestCountFilter] 🔍 GATEWAY_ROUTE_ATTR lookup result: {}", gatewayRoute);
+        log.debug("[RequestCountFilter] 🔍 GATEWAY_ROUTE_ATTR lookup result: {}", gatewayRoute);
         if (gatewayRoute != null) {
-            log.info("[RequestCountFilter] 🔍 Gateway Route Details:");
-            log.info("[RequestCountFilter] 🔍   Route ID: '{}'", gatewayRoute.getId());
-            log.info("[RequestCountFilter] 🔍   Route URI: {}", gatewayRoute.getUri());
-            log.info("[RequestCountFilter] 🔍   Route Predicate: {}", gatewayRoute.getPredicate());
-            log.info("[RequestCountFilter] 🔍   Route Metadata: {}", gatewayRoute.getMetadata());
-            log.info("[RequestCountFilter] 🔍   Route Filters: {}", gatewayRoute.getFilters().size());
+            log.debug("[RequestCountFilter] 🔍 Gateway Route Details:");
+            log.debug("[RequestCountFilter] 🔍   Route ID: '{}'", gatewayRoute.getId());
+            log.debug("[RequestCountFilter] 🔍   Route URI: {}", gatewayRoute.getUri());
+            log.debug("[RequestCountFilter] 🔍   Route Predicate: {}", gatewayRoute.getPredicate());
+            log.debug("[RequestCountFilter] 🔍   Route Metadata: {}", gatewayRoute.getMetadata());
+            log.debug("[RequestCountFilter] 🔍   Route Filters: {}", gatewayRoute.getFilters().size());
         } else {
-            log.error("[RequestCountFilter] 🔍 ❌ GATEWAY_ROUTE_ATTR IS NULL for path: {}", path);
+            log.debug("[RequestCountFilter] 🔍 ❌ GATEWAY_ROUTE_ATTR IS NULL for path: {}", path);
         }
 
         final String routeId;
@@ -92,8 +93,8 @@ public class RequestCountFilter implements WebFilter {
             routeId = gatewayRoute.getId();
             isGatewayRequest = true;
             log.info("[RequestCountFilter] ✅ Gateway-routed request - Route ID: '{}', Path: {}", routeId, path);
-            log.info("[RequestCountFilter] ✅ Route URI: {}", gatewayRoute.getUri());
-            log.info("[RequestCountFilter] ✅ Route metadata: {}", gatewayRoute.getMetadata());
+            log.debug("[RequestCountFilter] ✅ Route URI: {}", gatewayRoute.getUri());
+            log.debug("[RequestCountFilter] ✅ Route metadata: {}", gatewayRoute.getMetadata());
         } else {
             // This request didn't go through gateway routing
             // For debugging purposes, let's be more permissive and still record some requests
@@ -104,7 +105,7 @@ public class RequestCountFilter implements WebFilter {
                 log.error("[RequestCountFilter] ❌ CRITICAL: Path '{}' should be gateway-routed but GATEWAY_ROUTE_ATTR is missing!", path);
                 log.error("[RequestCountFilter] ❌ Check gateway routing configuration and filter order");
                 log.error("[RequestCountFilter] ❌ Available exchange attributes: {}", exchange.getAttributes().keySet());
-            } else if (path.startsWith("/api/metrics") || path.startsWith("/api/auth")) {
+            } else if (path.startsWith("/api/metrics") || path.startsWith("/api/auth") || path.startsWith("/api/analytics")) {
                 // These are legitimate direct API calls
                 routeId = "direct-api-call";
                 isGatewayRequest = false;
@@ -126,8 +127,12 @@ public class RequestCountFilter implements WebFilter {
 
         // Only record in analytics service for gateway-routed requests to maintain accurate route-specific metrics
         if (analyticsService != null && isGatewayRequest) {
-            log.debug("[RequestCountFilter] Recording gateway request in AnalyticsService for routeId: '{}'", routeId);
-            analyticsService.recordRequest(routeId);
+            try {
+                log.debug("[RequestCountFilter] Recording gateway request in AnalyticsService for routeId: '{}'", routeId);
+                analyticsService.recordRequest(routeId);
+            } catch (Exception e) {
+                log.warn("[RequestCountFilter] Failed to record request in AnalyticsService: {}", e.getMessage());
+            }
         } else if (analyticsService == null) {
             log.warn("[RequestCountFilter] AnalyticsService is null. Cannot record request for routeId: '{}'", routeId);
         } else {
@@ -167,8 +172,12 @@ public class RequestCountFilter implements WebFilter {
                     long responseTime = System.currentTimeMillis() - startTime;
                     log.debug("[RequestCountFilter] Response time for routeId '{}': {} ms", routeId, responseTime);
                     if (analyticsServiceFinal != null && isGatewayRequestFinal) {
-                        analyticsServiceFinal.recordResponseTime(routeId, responseTime);
-                        log.trace("[RequestCountFilter] Recorded response time for gateway request: {} ms", responseTime);
+                        try {
+                            analyticsServiceFinal.recordResponseTime(routeId, responseTime);
+                            log.trace("[RequestCountFilter] Recorded response time for gateway request: {} ms", responseTime);
+                        } catch (Exception e) {
+                            log.warn("[RequestCountFilter] Failed to record response time in AnalyticsService: {}", e.getMessage());
+                        }
                     } else if (analyticsServiceFinal == null) {
                         log.warn("[RequestCountFilter] AnalyticsService (final) is null. Cannot record response time for routeId: '{}'", routeId);
                     } else {
