@@ -634,14 +634,139 @@ public class AnalyticsService {
     private Map<String, Object> generateAIEnhancedExecutiveSummary(LocalDateTime startDate, LocalDateTime endDate) {
         Map<String, Object> summary = new HashMap<>();
 
-        // This would combine insights from all AI services
-        summary.put("overallSecurityPosture", "GOOD");
-        summary.put("keyThreats", Arrays.asList("High volume attacks", "Behavioral anomalies"));
-        summary.put("aiConfidence", 0.85);
-        summary.put("criticalFindings", 2);
-        summary.put("recommendedActions", 5);
+        try {
+            // Gather comprehensive security data
+            List<SecurityEvent> events = new ArrayList<>();
+            List<Map<String, Object>> alerts = new ArrayList<>();
+
+            try {
+                events = securityEventService.getEventsInTimeRange(startDate, endDate);
+                alerts = alertingService.getActiveAlerts();
+            } catch (Exception e) {
+                log.warn("Could not fetch some data for executive summary: {}", e.getMessage());
+            }
+
+            // Calculate comprehensive metrics
+            long totalEvents = events.size();
+            long criticalEvents = events.stream()
+                    .filter(e -> "CRITICAL".equals(e.getThreatLevel()))
+                    .count();
+
+            long highThreatAlerts = alerts.stream()
+                    .filter(alert -> {
+                        String severity = (String) alert.get("severity");
+                        return "CRITICAL".equals(severity) || "HIGH".equals(severity);
+                    })
+                    .count();
+
+            // Get additional context data
+            long totalRequests = RequestCountFilter.getTotalRequestCount();
+            long totalRejections = RequestCountFilter.getTotalRejectedCount();
+            List<Map<String, Object>> geographicThreats = getGeographicThreats();
+            List<String> topAttackVectors = getTopAttackVectors();
+
+            // Build comprehensive data package for AI
+            Map<String, Object> securityData = new HashMap<>();
+            securityData.put("totalEvents", totalEvents);
+            securityData.put("criticalEvents", criticalEvents);
+            securityData.put("highThreatAlerts", highThreatAlerts);
+            securityData.put("totalRequests", totalRequests);
+            securityData.put("totalRejections", totalRejections);
+            securityData.put("geographicThreats", geographicThreats);
+            securityData.put("topAttackVectors", topAttackVectors);
+            securityData.put("analysisStartDate", startDate);
+            securityData.put("analysisEndDate", endDate);
+
+            // Get AI-powered analysis
+            Map<String, Object> aiAnalysis = openAIAnalyticsService.generateExecutiveSummary(securityData);
+
+            // Combine base metrics with AI insights
+            summary.put("totalSecurityEvents", totalEvents);
+            summary.put("criticalEvents", criticalEvents);
+            summary.put("highThreatAlerts", highThreatAlerts);
+            summary.put("aiAnalysis", aiAnalysis);
+            summary.put("geographicThreatsCount", geographicThreats.size());
+            summary.put("topAttackVectors", topAttackVectors);
+
+            // Determine overall posture from AI or fallback logic
+            if (aiAnalysis.containsKey("structuredAnalysis") && !aiAnalysis.containsKey("error")) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> structured = (Map<String, Object>) aiAnalysis.get("structuredAnalysis");
+                summary.put("overallSecurityPosture", structured.getOrDefault("riskLevel", "MODERATE"));
+                summary.put("securityPostureScore", structured.getOrDefault("securityPostureScore", 5));
+                summary.put("aiConfidence", "HIGH");
+            } else {
+                // Fallback logic
+                if (totalEvents > 0) {
+                    double criticalEventRatio = (double) criticalEvents / totalEvents;
+                    double rejectionRate = totalRequests > 0 ? (double) totalRejections / totalRequests : 0;
+
+                    if (criticalEventRatio > 0.1 || rejectionRate > 0.5) {
+                        summary.put("overallSecurityPosture", "CONCERNING");
+                        summary.put("securityPostureScore", 3);
+                    } else if (criticalEventRatio > 0.05 || rejectionRate > 0.2) {
+                        summary.put("overallSecurityPosture", "MODERATE");
+                        summary.put("securityPostureScore", 6);
+                    } else {
+                        summary.put("overallSecurityPosture", "GOOD");
+                        summary.put("securityPostureScore", 8);
+                    }
+                } else {
+                    summary.put("overallSecurityPosture", "NO_DATA");
+                    summary.put("securityPostureScore", 5);
+                }
+                summary.put("aiConfidence", "LOW");
+            }
+
+            summary.put("analysisTimestamp", LocalDateTime.now());
+            summary.put("analysisWindow", java.time.Duration.between(startDate, endDate).toHours() + " hours");
+
+        } catch (Exception e) {
+            log.error("Error generating AI-enhanced executive summary: {}", e.getMessage(), e);
+            summary.put("error", "Failed to generate AI summary");
+            summary.put("fallbackData", generateBasicSummary(startDate, endDate));
+        }
 
         return summary;
+    }
+
+    private Map<String, Object> generateBasicSummary(LocalDateTime startDate, LocalDateTime endDate) {
+        Map<String, Object> basic = new HashMap<>();
+
+        try {
+            // Basic metrics without AI
+            long totalRequests = RequestCountFilter.getTotalRequestCount();
+            long totalRejections = RequestCountFilter.getTotalRejectedCount();
+
+            basic.put("totalRequests", totalRequests);
+            basic.put("totalRejections", totalRejections);
+            basic.put("rejectionRate", totalRequests > 0 ? (double) totalRejections / totalRequests : 0);
+            basic.put("analysisType", "Basic statistical analysis");
+            basic.put("timestamp", LocalDateTime.now());
+
+            if (totalRequests == 0) {
+                basic.put("summary", "No request data available for analysis period");
+                basic.put("riskLevel", "UNKNOWN");
+            } else {
+                double rejectionRate = (double) totalRejections / totalRequests;
+                if (rejectionRate > 0.3) {
+                    basic.put("summary", "High rejection rate detected - potential security issues");
+                    basic.put("riskLevel", "HIGH");
+                } else if (rejectionRate > 0.1) {
+                    basic.put("summary", "Moderate rejection rate - continue monitoring");
+                    basic.put("riskLevel", "MEDIUM");
+                } else {
+                    basic.put("summary", "Low rejection rate - system appears stable");
+                    basic.put("riskLevel", "LOW");
+                }
+            }
+
+        } catch (Exception e) {
+            log.error("Error generating basic summary: {}", e.getMessage());
+            basic.put("error", "Failed to generate basic summary");
+        }
+
+        return basic;
     }
 
     private List<Map<String, Object>> generateRouteSecurityAnalysis() {
@@ -763,12 +888,15 @@ public class AnalyticsService {
     }
 
     private List<String> getTopAttackVectors() {
-        // This would analyze rejection reasons across all routes
         Map<String, Long> rejectionCounts = new HashMap<>();
 
         for (RouteMetrics metrics : routeMetricsMap.values()) {
             metrics.getRejectionReasons().forEach((reason, count) ->
                     rejectionCounts.merge(reason, count.longValue(), Long::sum));
+        }
+
+        if (rejectionCounts.isEmpty()) {
+            return new ArrayList<>(); // Return empty list instead of fake data
         }
 
         return rejectionCounts.entrySet().stream()
@@ -778,10 +906,186 @@ public class AnalyticsService {
                 .collect(Collectors.toList());
     }
 
-    private List<String> getGeographicThreats() {
-        // This would require IP geolocation analysis
-        // For now, return placeholder data
-        return Arrays.asList("Unknown geographic threats - IP geolocation not implemented");
+
+    @Autowired
+    private GeolocationService geolocationService;
+
+    @Autowired
+    private OpenAIAnalyticsService openAIAnalyticsService;
+
+    private List<Map<String, Object>> getGeographicThreats() {
+        List<Map<String, Object>> threats = new ArrayList<>();
+
+        try {
+            LocalDateTime since = LocalDateTime.now().minusHours(24);
+
+            // Get recent security events
+            List<SecurityEvent> recentEvents = new ArrayList<>();
+            try {
+                recentEvents = securityEventService.getEventsInTimeRange(since, LocalDateTime.now());
+            } catch (Exception e) {
+                log.warn("Could not fetch security events for geographic analysis: {}", e.getMessage());
+                return threats; // Return empty list if we can't get events
+            }
+
+            // Group events by IP address (exclude localhost)
+            Map<String, List<SecurityEvent>> eventsByIp = recentEvents.stream()
+                    .filter(e -> e.getClientIp() != null &&
+                            !e.getClientIp().equals("127.0.0.1") &&
+                            !e.getClientIp().equals("::1"))
+                    .collect(Collectors.groupingBy(SecurityEvent::getClientIp));
+
+            // Analyze each IP for geographic patterns
+            Map<String, GeographicThreatData> countryThreats = new HashMap<>();
+
+            for (Map.Entry<String, List<SecurityEvent>> entry : eventsByIp.entrySet()) {
+                String ip = entry.getKey();
+                List<SecurityEvent> ipEvents = entry.getValue();
+
+                // Get geolocation data
+                GeolocationService.GeolocationData location = geolocationService.getLocation(ip);
+                String country = location.getCountry();
+
+                // Skip if country is unknown or local
+                if ("Unknown".equals(country) || "Local".equals(country)) {
+                    continue;
+                }
+
+                // Count rejections and total events for this IP
+                long rejections = ipEvents.stream()
+                        .filter(e -> "REJECTION".equals(e.getEventType()))
+                        .count();
+
+                long totalEvents = ipEvents.size();
+
+                // Update country-level threat data
+                GeographicThreatData threatData = countryThreats.computeIfAbsent(country,
+                        k -> new GeographicThreatData(country));
+
+                threatData.addIP(ip, totalEvents, rejections, location.getCity());
+            }
+
+            // Convert to threat list and filter for suspicious countries
+            for (GeographicThreatData threatData : countryThreats.values()) {
+                if (threatData.isSuspicious()) {
+                    Map<String, Object> threat = new HashMap<>();
+                    threat.put("country", threatData.getCountry());
+                    threat.put("uniqueIPs", threatData.getUniqueIPs());
+                    threat.put("totalEvents", threatData.getTotalEvents());
+                    threat.put("totalRejections", threatData.getTotalRejections());
+                    threat.put("rejectionRate", Math.round(threatData.getRejectionRate() * 100.0) / 100.0);
+                    threat.put("threatLevel", threatData.getThreatLevel());
+                    threat.put("cities", threatData.getTopCities());
+                    threat.put("suspiciousIPs", threatData.getSuspiciousIPs().size());
+
+                    threats.add(threat);
+                }
+            }
+
+            // Sort by threat level and total rejections
+            threats.sort((a, b) -> {
+                String levelA = (String) a.get("threatLevel");
+                String levelB = (String) b.get("threatLevel");
+                int levelComparison = getThreatLevelValue(levelB) - getThreatLevelValue(levelA);
+                if (levelComparison != 0) return levelComparison;
+
+                // If same threat level, sort by total rejections
+                Long rejectionsA = (Long) a.get("totalRejections");
+                Long rejectionsB = (Long) b.get("totalRejections");
+                return rejectionsB.compareTo(rejectionsA);
+            });
+
+            log.info("Identified {} geographic threats from {} countries",
+                    threats.size(), countryThreats.size());
+
+        } catch (Exception e) {
+            log.error("Error analyzing geographic threats: {}", e.getMessage(), e);
+        }
+
+        return threats;
+    }
+
+    private static class GeographicThreatData {
+        private final String country;
+        private final Set<String> uniqueIPs = new HashSet<>();
+        private final Map<String, Integer> cityCount = new HashMap<>();
+        private final List<String> suspiciousIPs = new ArrayList<>();
+        private long totalEvents = 0;
+        private long totalRejections = 0;
+
+        public GeographicThreatData(String country) {
+            this.country = country;
+        }
+
+        public void addIP(String ip, long events, long rejections, String city) {
+            uniqueIPs.add(ip);
+            totalEvents += events;
+            totalRejections += rejections;
+
+            if (city != null && !city.equals("Unknown") && !city.trim().isEmpty()) {
+                cityCount.merge(city, 1, Integer::sum);
+            }
+
+            // Mark as suspicious if high rejection rate or high total rejections
+            double rejectionRate = events > 0 ? (double) rejections / events : 0;
+            if (rejectionRate > 0.5 || rejections > 10) {
+                suspiciousIPs.add(ip);
+            }
+        }
+
+        public boolean isSuspicious() {
+            // Consider suspicious if:
+            // 1. Multiple IPs from same country (potential coordinated attack)
+            // 2. High overall rejection rate from this country
+            // 3. High total rejections from this country
+            // 4. Multiple suspicious IPs
+            return uniqueIPs.size() >= 2 ||
+                    getRejectionRate() > 0.3 ||
+                    totalRejections > 15 ||
+                    suspiciousIPs.size() >= 2;
+        }
+
+        public String getThreatLevel() {
+            if (totalRejections > 100 || getRejectionRate() > 0.7 || suspiciousIPs.size() > 5) {
+                return "CRITICAL";
+            }
+            if (totalRejections > 50 || getRejectionRate() > 0.5 || suspiciousIPs.size() > 3) {
+                return "HIGH";
+            }
+            if (totalRejections > 20 || getRejectionRate() > 0.3 || suspiciousIPs.size() > 1) {
+                return "MEDIUM";
+            }
+            return "LOW";
+        }
+
+        public double getRejectionRate() {
+            return totalEvents > 0 ? (double) totalRejections / totalEvents : 0;
+        }
+
+        public List<String> getTopCities() {
+            return cityCount.entrySet().stream()
+                    .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
+                    .limit(3)
+                    .map(Map.Entry::getKey)
+                    .collect(Collectors.toList());
+        }
+
+        // Getters
+        public String getCountry() { return country; }
+        public int getUniqueIPs() { return uniqueIPs.size(); }
+        public long getTotalEvents() { return totalEvents; }
+        public long getTotalRejections() { return totalRejections; }
+        public List<String> getSuspiciousIPs() { return suspiciousIPs; }
+    }
+
+    private int getThreatLevelValue(String level) {
+        return switch (level) {
+            case "CRITICAL" -> 4;
+            case "HIGH" -> 3;
+            case "MEDIUM" -> 2;
+            case "LOW" -> 1;
+            default -> 0;
+        };
     }
 
     // Inner class for route metrics

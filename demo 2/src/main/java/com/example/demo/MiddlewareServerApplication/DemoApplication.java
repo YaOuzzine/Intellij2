@@ -12,6 +12,12 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableScheduling
 public class DemoApplication {
 	public static void main(String[] args) {
+		// Load environment variables
+		String openaiKey = System.getenv("OPENAI_API_KEY");
+		if (openaiKey != null) {
+			System.setProperty("openai.api.key", openaiKey);
+		}
+
 		SpringApplication.run(DemoApplication.class, args);
 	}
 }

@@ -3,6 +3,7 @@ package com.example.demo.Controller;
 
 import com.example.demo.Filter.RequestCountFilter;
 import com.example.demo.Service.AnalyticsService;
+import com.example.demo.Repository.SecurityEventRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,15 +24,14 @@ public class MetricsController {
 
     private static final Logger log = LoggerFactory.getLogger(MetricsController.class);
     private final AnalyticsService analyticsService;
+    private final SecurityEventRepository eventRepository;
 
     @Autowired
-    public MetricsController(AnalyticsService analyticsService) {
+    public MetricsController(AnalyticsService analyticsService, SecurityEventRepository eventRepository) {
         this.analyticsService = analyticsService;
+        this.eventRepository = eventRepository;
     }
 
-    /**
-     * Get basic request metrics (total counts)
-     */
     @GetMapping("/requests")
     public ResponseEntity<Map<String, Object>> getRequestMetrics(
             @RequestParam(required = false) String routeId) {
@@ -41,7 +41,6 @@ public class MetricsController {
             Map<String, Object> metrics = new HashMap<>();
 
             if (routeId != null && !routeId.isEmpty() && !"all".equals(routeId)) {
-                // Get route-specific metrics from analytics service
                 Map<String, Object> routeAnalytics = analyticsService.getRouteAnalyticsWithAI(routeId);
 
                 if (routeAnalytics.containsKey("error")) {
@@ -52,7 +51,6 @@ public class MetricsController {
                     metrics.put("rejectedCount", routeAnalytics.getOrDefault("totalRejections", 0));
                 }
             } else {
-                // Get global metrics from RequestCountFilter
                 metrics.put("requestCount", RequestCountFilter.getTotalRequestCount());
                 metrics.put("rejectedCount", RequestCountFilter.getTotalRejectedCount());
             }
@@ -67,9 +65,6 @@ public class MetricsController {
         }
     }
 
-    /**
-     * Get minutely metrics (current and previous minute)
-     */
     @GetMapping("/minutely")
     public ResponseEntity<Map<String, Object>> getMinutelyMetrics(
             @RequestParam(required = false) String routeId) {
@@ -79,14 +74,12 @@ public class MetricsController {
             Map<String, Object> metrics = new HashMap<>();
 
             if (routeId != null && !routeId.isEmpty() && !"all".equals(routeId)) {
-                // For route-specific minutely data, we'll need to implement this in AnalyticsService
-                // For now, return zeros as route-specific minutely tracking isn't implemented yet
+                // Route-specific minutely data not implemented yet - return zeros
                 metrics.put("requestsCurrentMinute", 0);
                 metrics.put("requestsPreviousMinute", 0);
                 metrics.put("rejectedCurrentMinute", 0);
                 metrics.put("rejectedPreviousMinute", 0);
             } else {
-                // Get global minutely metrics from RequestCountFilter
                 RequestCountFilter.MinuteMetrics minuteMetrics = RequestCountFilter.getMinuteMetrics();
                 metrics.put("requestsCurrentMinute", minuteMetrics.getRequestsCurrentMinute());
                 metrics.put("requestsPreviousMinute", minuteMetrics.getRequestsPreviousMinute());
@@ -104,9 +97,6 @@ public class MetricsController {
         }
     }
 
-    /**
-     * Get rejection reasons breakdown
-     */
     @GetMapping("/rejections")
     public ResponseEntity<Map<String, Object>> getRejectionMetrics(
             @RequestParam(required = false) String routeId) {
@@ -116,7 +106,6 @@ public class MetricsController {
             Map<String, Object> metrics = new HashMap<>();
 
             if (routeId != null && !routeId.isEmpty() && !"all".equals(routeId)) {
-                // Get route-specific rejection reasons from analytics service
                 Map<String, Object> routeAnalytics = analyticsService.getRouteAnalyticsWithAI(routeId);
 
                 if (routeAnalytics.containsKey("rejectionReasons")) {
@@ -130,10 +119,8 @@ public class MetricsController {
                     metrics.put("rejectionReasons", new HashMap<>());
                 }
             } else {
-                // Get global rejection reasons from RequestCountFilter
                 ConcurrentHashMap<String, String> globalReasons = RequestCountFilter.getRejectionReasons();
 
-                // Convert to reason -> count mapping
                 Map<String, Long> reasonCounts = globalReasons.values().stream()
                         .collect(Collectors.groupingBy(
                                 reason -> reason,
@@ -153,41 +140,36 @@ public class MetricsController {
         }
     }
 
-    /**
-     * Get time series data for charts
-     */
+    // REMOVED: getTimeSeriesData() method - was generating fake data
+    // Real time series data should come from SecurityEventRepository queries
+
     @GetMapping("/timeseries")
     public ResponseEntity<Map<String, Object>> getTimeSeriesData(
             @RequestParam(defaultValue = "1h") String timeRange,
             @RequestParam(required = false) String routeId) {
         try {
-            log.debug("Fetching time series data for timeRange: {}, routeId: {}", timeRange, routeId);
+            log.debug("Fetching real time series data for timeRange: {}, routeId: {}", timeRange, routeId);
 
             Map<String, Object> response = new HashMap<>();
-            List<Map<String, Object>> timeSeries = new ArrayList<>();
 
-            // Generate sample time series data since we don't have persistent storage yet
-            // In a real implementation, this would query the SecurityEvent repository
             LocalDateTime now = LocalDateTime.now();
             LocalDateTime start = calculateStartTime(now, timeRange);
 
-            // Generate data points every 5 minutes for the requested time range
-            LocalDateTime current = start;
-            while (current.isBefore(now)) {
+            // Get real data from database
+            List<Object[]> hourlyData = eventRepository.getHourlyEventCounts(start);
+
+            List<Map<String, Object>> timeSeries = new ArrayList<>();
+            for (Object[] row : hourlyData) {
                 Map<String, Object> dataPoint = new HashMap<>();
-                dataPoint.put("time", current.format(DateTimeFormatter.ofPattern("HH:mm")));
+                dataPoint.put("time", row[0].toString());
+                dataPoint.put("total", row[1]);
 
-                // Simulate some realistic data with variation
-                int baseRequests = 10 + (int)(Math.random() * 20);
-                int rejections = (int)(Math.random() * 5);
-
-                dataPoint.put("total", baseRequests + rejections);
-                dataPoint.put("accepted", baseRequests);
-                dataPoint.put("rejected", rejections);
-                dataPoint.put("avgResponseTime", 200 + (int)(Math.random() * 300));
+                // Get rejection data for the same time period
+                // This would need additional repository method for rejections by hour
+                dataPoint.put("rejected", 0); // Placeholder until rejection tracking by hour is implemented
+                dataPoint.put("accepted", (Long)row[1] - 0); // total - rejected
 
                 timeSeries.add(dataPoint);
-                current = current.plusMinutes(5);
             }
 
             response.put("timeSeries", timeSeries);
@@ -204,19 +186,12 @@ public class MetricsController {
         }
     }
 
-    /**
-     * Get comprehensive analytics dashboard data
-     */
     @GetMapping("/dashboard")
     public ResponseEntity<Map<String, Object>> getDashboardMetrics() {
         try {
             log.info("Fetching comprehensive dashboard metrics");
-
-            // Get enhanced dashboard data from analytics service
             Map<String, Object> dashboardData = analyticsService.getEnhancedDashboardData();
-
             return ResponseEntity.ok(dashboardData);
-
         } catch (Exception e) {
             log.error("Error fetching dashboard metrics: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -224,15 +199,11 @@ public class MetricsController {
         }
     }
 
-    /**
-     * Get health status of metrics system
-     */
     @GetMapping("/health")
     public ResponseEntity<Map<String, Object>> getMetricsHealth() {
         Map<String, Object> health = new HashMap<>();
 
         try {
-            // Check if analytics service is working
             RequestCountFilter.MinuteMetrics metrics = RequestCountFilter.getMinuteMetrics();
 
             health.put("status", "HEALTHY");
@@ -252,34 +223,6 @@ public class MetricsController {
         }
     }
 
-    /**
-     * Reset metrics (for testing purposes)
-     */
-    @PostMapping("/reset")
-    public ResponseEntity<Map<String, Object>> resetMetrics() {
-        try {
-            log.warn("Metrics reset requested - this should only be used for testing");
-
-            // Note: We can't actually reset the static counters in RequestCountFilter
-            // without adding a reset method there. This is just a placeholder.
-
-            Map<String, Object> response = new HashMap<>();
-            response.put("message", "Metrics reset requested");
-            response.put("note", "Static counters cannot be reset without service restart");
-            response.put("timestamp", LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
-
-            return ResponseEntity.ok(response);
-
-        } catch (Exception e) {
-            log.error("Error resetting metrics: {}", e.getMessage(), e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", "Failed to reset metrics", "message", e.getMessage()));
-        }
-    }
-
-    /**
-     * Calculate start time based on time range
-     */
     private LocalDateTime calculateStartTime(LocalDateTime now, String timeRange) {
         switch (timeRange) {
             case "1h":
