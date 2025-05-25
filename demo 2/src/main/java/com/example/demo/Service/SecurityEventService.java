@@ -38,6 +38,14 @@ public class SecurityEventService {
     /**
      * Record a security event asynchronously for better performance
      */
+    @Autowired
+    private ThreatAnalysisService threatAnalysisService;
+
+    @Autowired
+    private AlertingService alertingService;
+
+    @Autowired
+    private GeolocationService geolocationService;
     @Async
     @Transactional
     public CompletableFuture<SecurityEvent> recordEventAsync(SecurityEvent event) {
@@ -48,8 +56,39 @@ public class SecurityEventService {
             // Calculate threat level based on event characteristics
             event.setThreatLevel(calculateThreatLevel(event));
 
+            // Add geolocation data if IP is available
+            if (event.getClientIp() != null) {
+                try {
+                    GeolocationService.GeolocationData location = geolocationService.getLocation(event.getClientIp());
+                    event.setGeoLocation(objectMapper.writeValueAsString(Map.of(
+                            "country", location.getCountry(),
+                            "city", location.getCity(),
+                            "region", location.getRegion(),
+                            "countryCode", location.getCountryCode()
+                    )));
+                } catch (Exception e) {
+                    log.warn("Failed to get geolocation for IP {}: {}", event.getClientIp(), e.getMessage());
+                }
+            }
+
             SecurityEvent savedEvent = eventRepository.save(event);
             log.trace("Security event saved with ID: {}", savedEvent.getId());
+
+            // CRITICAL ADDITION: Trigger automatic threat analysis
+            try {
+                if (threatAnalysisService != null) {
+                    threatAnalysisService.analyzeEvent(savedEvent);
+                    log.debug("Triggered threat analysis for event ID: {}", savedEvent.getId());
+                }
+
+                if (alertingService != null) {
+                    alertingService.processSecurityEvent(savedEvent);
+                    log.debug("Triggered alerting analysis for event ID: {}", savedEvent.getId());
+                }
+            } catch (Exception e) {
+                log.error("Error triggering threat analysis for event {}: {}", savedEvent.getId(), e.getMessage(), e);
+                // Don't fail the event recording if threat analysis fails
+            }
 
             return CompletableFuture.completedFuture(savedEvent);
         } catch (Exception e) {
@@ -61,6 +100,7 @@ public class SecurityEventService {
     /**
      * Record a security event synchronously
      */
+
     @Transactional
     public SecurityEvent recordEvent(SecurityEvent event) {
         try {
@@ -280,6 +320,21 @@ public class SecurityEventService {
         // Check for slow response times (potential DoS)
         if (event.getResponseTimeMs() != null && event.getResponseTimeMs() > CRITICAL_RESPONSE_TIME) {
             return "HIGH";
+        }
+
+        if (event.getClientIp() != null) {
+            try {
+                GeolocationService.GeolocationData location = geolocationService.getLocation(event.getClientIp());
+                ObjectMapper mapper = new ObjectMapper();
+                event.setGeoLocation(mapper.writeValueAsString(Map.of(
+                        "country", location.getCountry(),
+                        "city", location.getCity(),
+                        "region", location.getRegion(),
+                        "countryCode", location.getCountryCode()
+                )));
+            } catch (Exception e) {
+                log.warn("Failed to get geolocation for IP {}: {}", event.getClientIp(), e.getMessage());
+            }
         }
 
         return "LOW";

@@ -12,10 +12,17 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableScheduling
 public class DemoApplication {
 	public static void main(String[] args) {
-		// Load environment variables
+		// Debug environment loading
 		String openaiKey = System.getenv("OPENAI_API_KEY");
+		System.out.println("=== Environment Debug ===");
+		System.out.println("OPENAI_API_KEY from env: " + (openaiKey != null ? "PRESENT (length: " + openaiKey.length() + ")" : "NOT FOUND"));
+		System.out.println("System property openai.api.key: " + System.getProperty("openai.api.key", "NOT SET"));
+
 		if (openaiKey != null) {
 			System.setProperty("openai.api.key", openaiKey);
+			System.out.println("Set system property from environment variable");
+		} else {
+			System.out.println("WARNING: OPENAI_API_KEY environment variable not found");
 		}
 
 		SpringApplication.run(DemoApplication.class, args);

@@ -45,6 +45,16 @@ public class OpenAIService {
     }
 
     public Mono<String> generateChatCompletion(String systemPrompt, String userPrompt) {
+        log.info("=== OpenAI API Call Debug ===");
+        log.info("API Key present: {}", apiKey != null && !apiKey.trim().isEmpty());
+        log.info("API Key length: {}", apiKey != null ? apiKey.length() : 0);
+        log.info("API Key starts with 'sk-': {}", apiKey != null && apiKey.startsWith("sk-"));
+        log.info("Model: {}", model);
+        log.info("Max Tokens: {}", maxTokens);
+        log.info("Temperature: {}", temperature);
+        log.info("System prompt length: {}", systemPrompt != null ? systemPrompt.length() : 0);
+        log.info("User prompt length: {}", userPrompt != null ? userPrompt.length() : 0);
+
         if (apiKey == null || apiKey.trim().isEmpty()) {
             log.warn("OpenAI API key not configured, returning fallback response");
             return Mono.just("OpenAI API not configured. Please set openai.api.key in application.properties");
@@ -59,20 +69,41 @@ public class OpenAIService {
                 new ChatMessage("user", userPrompt)
         );
 
+        log.info("Making OpenAI API request to: {}", "https://api.openai.com/v1/chat/completions");
+
         return webClient.post()
                 .uri("/chat/completions")
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
                 .bodyValue(request)
                 .retrieve()
                 .bodyToMono(ChatCompletionResponse.class)
+                .doOnNext(response -> {
+                    log.info("=== OpenAI Response Received ===");
+                    log.info("Response has choices: {}", response.choices != null && !response.choices.isEmpty());
+                    if (response.choices != null && !response.choices.isEmpty()) {
+                        log.info("Response content length: {}", response.choices.get(0).message.content.length());
+                        log.info("Response content preview: {}", response.choices.get(0).message.content.substring(0, Math.min(100, response.choices.get(0).message.content.length())));
+                    }
+                })
                 .map(response -> {
                     if (response.choices != null && !response.choices.isEmpty()) {
-                        return response.choices.get(0).message.content;
+                        String content = response.choices.get(0).message.content;
+                        log.info("OpenAI API call successful, response length: {}", content.length());
+                        return content;
                     }
+                    log.warn("No response choices from OpenAI");
                     return "No response from OpenAI";
                 })
                 .timeout(Duration.ofSeconds(30))
-                .onErrorReturn("Error communicating with OpenAI API");
+                .doOnError(error -> {
+                    log.error("=== OpenAI API Error ===");
+                    log.error("Error type: {}", error.getClass().getSimpleName());
+                    log.error("Error message: {}", error.getMessage());
+                    if (error.getCause() != null) {
+                        log.error("Error cause: {}", error.getCause().getMessage());
+                    }
+                })
+                .onErrorReturn("Error communicating with OpenAI API: ");
     }
 
     // DTOs for OpenAI API

@@ -5,6 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Mono;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
@@ -19,54 +20,59 @@ public class OpenAIAnalyticsService {
     @Autowired
     private OpenAIService openAIService;
 
-    public Map<String, Object> generateExecutiveSummary(Map<String, Object> securityData) {
-        Map<String, Object> result = new HashMap<>();
+    public Mono<Map<String, Object>> generateExecutiveSummary(Map<String, Object> securityData) {
+        log.info("=== OpenAI Analytics Service Debug ===");
+        log.info("OpenAI service available: {}", openAIService != null);
+        log.info("Security data keys: {}", securityData != null ? securityData.keySet() : "null");
+        log.info("Security data size: {}", securityData != null ? securityData.size() : 0);
 
-        try {
-            String systemPrompt = """
-                You are a senior cybersecurity analyst with 20+ years of experience. 
-                Analyze the provided security data and generate a comprehensive executive summary.
-                Your analysis should be professional, actionable, and focused on business impact.
-                
-                Format your response as structured sections:
-                1. SECURITY POSTURE: Overall assessment (1-10 scale with explanation)
-                2. KEY THREATS: Most critical current threats (be specific)
-                3. BUSINESS IMPACT: Potential impact on operations
-                4. IMMEDIATE ACTIONS: Top 3 priority actions
-                5. RISK LEVEL: Overall risk assessment (LOW/MEDIUM/HIGH/CRITICAL)
-                
-                Keep your response concise but comprehensive.
-                """;
+        String systemPrompt = """
+        You are a senior cybersecurity analyst with 20+ years of experience. 
+        Analyze the provided security data and generate a comprehensive executive summary.
+        Your analysis should be professional, actionable, and focused on business impact.
+        
+        Format your response as structured sections:
+        1. SECURITY POSTURE: Overall assessment (1-10 scale with explanation)
+        2. KEY THREATS: Most critical current threats (be specific)
+        3. BUSINESS IMPACT: Potential impact on operations
+        4. IMMEDIATE ACTIONS: Top 3 priority actions
+        5. RISK LEVEL: Overall risk assessment (LOW/MEDIUM/HIGH/CRITICAL)
+        
+        Keep your response concise but comprehensive.
+        """;
 
-            String userPrompt = buildExecutiveSummaryPrompt(securityData);
+        String userPrompt = buildExecutiveSummaryPrompt(securityData);
 
-            String aiAnalysis = openAIService.generateChatCompletion(systemPrompt, userPrompt)
-                    .block(); // Block for synchronous execution
+        return openAIService.generateChatCompletion(systemPrompt, userPrompt)
+                .map(aiAnalysis -> {
+                    Map<String, Object> result = new HashMap<>();
 
-            if (aiAnalysis != null && !aiAnalysis.contains("Error") && !aiAnalysis.contains("not configured")) {
-                // Parse AI response into structured data
-                Map<String, Object> parsedAnalysis = parseAIResponse(aiAnalysis);
+                    if (aiAnalysis != null && !aiAnalysis.contains("Error") && !aiAnalysis.contains("not configured")) {
+                        // Parse AI response into structured data
+                        Map<String, Object> parsedAnalysis = parseAIResponse(aiAnalysis);
 
-                result.put("aiAnalysis", aiAnalysis);
-                result.put("structuredAnalysis", parsedAnalysis);
-                result.put("confidence", "HIGH");
-                result.put("generatedBy", "OpenAI GPT");
-                result.put("timestamp", LocalDateTime.now());
+                        result.put("aiAnalysis", aiAnalysis);
+                        result.put("structuredAnalysis", parsedAnalysis);
+                        result.put("confidence", "HIGH");
+                        result.put("generatedBy", "OpenAI GPT");
+                        result.put("timestamp", LocalDateTime.now());
 
-                log.info("Generated AI executive summary successfully");
-            } else {
-                log.warn("AI analysis failed or not configured, using fallback");
-                result.put("error", "AI analysis unavailable");
-                result.put("fallbackAnalysis", generateFallbackSummary(securityData));
-            }
+                        log.info("Generated AI executive summary successfully");
+                    } else {
+                        log.warn("AI analysis failed or not configured, using fallback");
+                        result.put("error", "AI analysis unavailable");
+                        result.put("fallbackAnalysis", generateFallbackSummary(securityData));
+                    }
 
-        } catch (Exception e) {
-            log.error("Error generating AI executive summary: {}", e.getMessage(), e);
-            result.put("error", "AI analysis unavailable");
-            result.put("fallbackAnalysis", generateFallbackSummary(securityData));
-        }
-
-        return result;
+                    return result;
+                })
+                .onErrorResume(e -> {
+                    log.error("Error generating AI executive summary: {}", e.getMessage(), e);
+                    Map<String, Object> errorResult = new HashMap<>();
+                    errorResult.put("error", "AI analysis unavailable");
+                    errorResult.put("fallbackAnalysis", generateFallbackSummary(securityData));
+                    return Mono.just(errorResult);
+                });
     }
 
     private String buildExecutiveSummaryPrompt(Map<String, Object> securityData) {

@@ -1,6 +1,7 @@
 // demo 2/src/main/java/com/example/demo/Filter/RequestCountFilter.java
 package com.example.demo.Filter;
 
+import com.example.demo.Db.IpUtils;
 import com.example.demo.Service.AnalyticsService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -128,10 +129,16 @@ public class RequestCountFilter implements WebFilter {
         // Only record in analytics service for gateway-routed requests to maintain accurate route-specific metrics
         if (analyticsService != null && isGatewayRequest) {
             try {
-                log.debug("[RequestCountFilter] Recording gateway request in AnalyticsService for routeId: '{}'", routeId);
-                analyticsService.recordRequest(routeId);
+                // Extract full request context
+                String clientIp = IpUtils.getClientIp(exchange.getRequest());
+                String userAgent = exchange.getRequest().getHeaders().getFirst("User-Agent");
+                String requestMethod = exchange.getRequest().getMethod().name();
+                String requestPath = exchange.getRequest().getURI().getPath();
+
+                log.debug("[RequestCountFilter] Recording gateway request with full context for routeId: '{}'", routeId);
+                analyticsService.recordRequestWithContext(routeId, clientIp, requestPath, requestMethod, userAgent);
             } catch (Exception e) {
-                log.warn("[RequestCountFilter] Failed to record request in AnalyticsService: {}", e.getMessage());
+                log.warn("[RequestCountFilter] Failed to record request with context in AnalyticsService: {}", e.getMessage());
             }
         } else if (analyticsService == null) {
             log.warn("[RequestCountFilter] AnalyticsService is null. Cannot record request for routeId: '{}'", routeId);
@@ -166,6 +173,22 @@ public class RequestCountFilter implements WebFilter {
                         String reason = determineRejectionReason(finalStatus, exchange);
                         log.info("[RequestCountFilter] Request for routeId '{}' resulted in status {} ({}). Rejection reason: {}", routeId, finalStatus.value(), finalStatus.isError(), reason);
                         countRejectedRequest(reason, routeId, isGatewayRequestFinal);
+
+                        // ENHANCED: Record rejection with full context
+                        if (analyticsServiceFinal != null && isGatewayRequestFinal) {
+                            try {
+                                String clientIp = IpUtils.getClientIp(exchange.getRequest());
+                                String userAgent = exchange.getRequest().getHeaders().getFirst("User-Agent");
+                                String requestMethod = exchange.getRequest().getMethod().name();
+                                String requestPath = exchange.getRequest().getURI().getPath();
+
+                                analyticsServiceFinal.recordRejectionWithContext(routeId, clientIp, requestPath,
+                                        requestMethod, userAgent, reason, finalStatus.value());
+                                log.debug("[RequestCountFilter] Recorded rejection with full context for routeId: '{}'", routeId);
+                            } catch (Exception e) {
+                                log.warn("[RequestCountFilter] Failed to record rejection with context: {}", e.getMessage());
+                            }
+                        }
                     }
 
                     // Calculate and record response time only for gateway requests

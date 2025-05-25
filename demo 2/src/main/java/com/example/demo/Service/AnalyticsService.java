@@ -13,6 +13,7 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import reactor.core.publisher.Mono;
 
 import jakarta.annotation.PostConstruct;
 import java.time.LocalDateTime;
@@ -338,48 +339,97 @@ public class AnalyticsService {
     }
 
     /**
+     * Record a request with full context for enhanced analytics
+     */
+    public void recordRequestWithContext(String routeId, String clientIp, String requestPath, String method, String userAgent) {
+        if (routeId == null) return;
+
+        // Update in-memory metrics
+        recordRequest(routeId);
+
+        // Create detailed security event with full context
+        SecurityEvent event = new SecurityEvent("REQUEST", routeId, clientIp);
+        event.setRequestPath(requestPath);
+        event.setRequestMethod(method);
+        event.setUserAgent(userAgent);
+        event.setTimestamp(LocalDateTime.now());
+
+        // Record for AI analysis
+        securityEventService.recordEventAsync(event);
+
+        log.trace("Recorded request with context for route: {} from IP: {}", routeId, clientIp);
+    }
+
+    /**
+     * Record a rejection with full context for enhanced analytics
+     */
+    public void recordRejectionWithContext(String routeId, String clientIp, String requestPath, String method,
+                                           String userAgent, String rejectionReason, Integer statusCode) {
+        if (routeId == null) return;
+
+        // Update in-memory metrics
+        recordRejection(routeId, rejectionReason);
+
+        // Create detailed security event with full context
+        SecurityEvent event = new SecurityEvent("REJECTION", routeId, clientIp);
+        event.setRequestPath(requestPath);
+        event.setRequestMethod(method);
+        event.setUserAgent(userAgent);
+        event.setRejectionReason(rejectionReason);
+        event.setResponseStatus(statusCode);
+        event.setTimestamp(LocalDateTime.now());
+
+        // Record for AI analysis - this will automatically trigger threat analysis
+        securityEventService.recordEventAsync(event);
+
+        log.debug("Recorded rejection with context for route: {} from IP: {} - Reason: {}", routeId, clientIp, rejectionReason);
+    }
+
+    /**
      * Generate comprehensive security report with AI insights
      */
     @Transactional(readOnly = true)
-    public Map<String, Object> generateSecurityReport(LocalDateTime startDate, LocalDateTime endDate) {
-        Map<String, Object> report = new HashMap<>();
+    public Mono<Map<String, Object>> generateSecurityReport(LocalDateTime startDate, LocalDateTime endDate) {
+        log.info("Generating comprehensive security report from {} to {}", startDate, endDate);
 
-        try {
-            log.info("Generating comprehensive security report from {} to {}", startDate, endDate);
+        return generateAIEnhancedExecutiveSummary(startDate, endDate)
+                .map(executiveSummary -> {
+                    Map<String, Object> report = new HashMap<>();
 
-            // Executive summary with AI insights
-            Map<String, Object> executiveSummary = generateAIEnhancedExecutiveSummary(startDate, endDate);
-            report.put("executiveSummary", executiveSummary);
+                    try {
+                        // Executive summary with AI insights
+                        report.put("executiveSummary", executiveSummary);
 
-            // Security events analysis
-            Map<String, Object> eventsAnalysis = securityEventService.getAggregatedMetrics(null, startDate, endDate);
-            report.put("securityEventsAnalysis", eventsAnalysis);
+                        // Security events analysis
+                        Map<String, Object> eventsAnalysis = securityEventService.getAggregatedMetrics(null, startDate, endDate);
+                        report.put("securityEventsAnalysis", eventsAnalysis);
 
-            // AI threat analysis
-            Map<String, Object> aiThreatAnalysis = aiSecurityService.generateSecurityInsights();
-            report.put("aiThreatAnalysis", aiThreatAnalysis);
+                        // AI threat analysis
+                        Map<String, Object> aiThreatAnalysis = aiSecurityService.generateSecurityInsights();
+                        report.put("aiThreatAnalysis", aiThreatAnalysis);
 
-            // Compliance report
-            Map<String, Object> complianceReport = complianceReportingService.generateComplianceReport("SOC2", startDate, endDate);
-            report.put("complianceAnalysis", complianceReport);
+                        // Compliance report
+                        Map<String, Object> complianceReport = complianceReportingService.generateComplianceReport("SOC2", startDate, endDate);
+                        report.put("complianceAnalysis", complianceReport);
 
-            // Route security analysis
-            List<Map<String, Object>> routeSecurityAnalysis = generateRouteSecurityAnalysis();
-            report.put("routeSecurityAnalysis", routeSecurityAnalysis);
+                        // Route security analysis
+                        List<Map<String, Object>> routeSecurityAnalysis = generateRouteSecurityAnalysis();
+                        report.put("routeSecurityAnalysis", routeSecurityAnalysis);
 
-            // Recommendations and action items
-            List<Map<String, Object>> actionItems = generateSecurityActionItems();
-            report.put("actionItems", actionItems);
+                        // Recommendations and action items
+                        List<Map<String, Object>> actionItems = generateSecurityActionItems();
+                        report.put("actionItems", actionItems);
 
-            report.put("reportPeriod", Map.of("start", startDate, "end", endDate));
-            report.put("generatedAt", LocalDateTime.now());
+                        report.put("reportPeriod", Map.of("start", startDate, "end", endDate));
+                        report.put("generatedAt", LocalDateTime.now());
 
-        } catch (Exception e) {
-            log.error("Error generating security report: {}", e.getMessage(), e);
-            report.put("error", e.getMessage());
-        }
+                    } catch (Exception e) {
+                        log.error("Error generating security report: {}", e.getMessage(), e);
+                        report.put("error", e.getMessage());
+                    }
 
-        return report;
+                    return report;
+                });
     }
 
     /**
@@ -631,9 +681,7 @@ public class AnalyticsService {
         return recommendations;
     }
 
-    private Map<String, Object> generateAIEnhancedExecutiveSummary(LocalDateTime startDate, LocalDateTime endDate) {
-        Map<String, Object> summary = new HashMap<>();
-
+    private Mono<Map<String, Object>> generateAIEnhancedExecutiveSummary(LocalDateTime startDate, LocalDateTime endDate) {
         try {
             // Gather comprehensive security data
             List<SecurityEvent> events = new ArrayList<>();
@@ -677,57 +725,62 @@ public class AnalyticsService {
             securityData.put("analysisStartDate", startDate);
             securityData.put("analysisEndDate", endDate);
 
-            // Get AI-powered analysis
-            Map<String, Object> aiAnalysis = openAIAnalyticsService.generateExecutiveSummary(securityData);
+            // Get AI-powered analysis (now returns Mono)
+            return openAIAnalyticsService.generateExecutiveSummary(securityData)
+                    .map(aiAnalysis -> {
+                        Map<String, Object> summary = new HashMap<>();
 
-            // Combine base metrics with AI insights
-            summary.put("totalSecurityEvents", totalEvents);
-            summary.put("criticalEvents", criticalEvents);
-            summary.put("highThreatAlerts", highThreatAlerts);
-            summary.put("aiAnalysis", aiAnalysis);
-            summary.put("geographicThreatsCount", geographicThreats.size());
-            summary.put("topAttackVectors", topAttackVectors);
+                        // Combine base metrics with AI insights
+                        summary.put("totalSecurityEvents", totalEvents);
+                        summary.put("criticalEvents", criticalEvents);
+                        summary.put("highThreatAlerts", highThreatAlerts);
+                        summary.put("aiAnalysis", aiAnalysis);
+                        summary.put("geographicThreatsCount", geographicThreats.size());
+                        summary.put("topAttackVectors", topAttackVectors);
 
-            // Determine overall posture from AI or fallback logic
-            if (aiAnalysis.containsKey("structuredAnalysis") && !aiAnalysis.containsKey("error")) {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> structured = (Map<String, Object>) aiAnalysis.get("structuredAnalysis");
-                summary.put("overallSecurityPosture", structured.getOrDefault("riskLevel", "MODERATE"));
-                summary.put("securityPostureScore", structured.getOrDefault("securityPostureScore", 5));
-                summary.put("aiConfidence", "HIGH");
-            } else {
-                // Fallback logic
-                if (totalEvents > 0) {
-                    double criticalEventRatio = (double) criticalEvents / totalEvents;
-                    double rejectionRate = totalRequests > 0 ? (double) totalRejections / totalRequests : 0;
+                        // Determine overall posture from AI or fallback logic
+                        if (aiAnalysis.containsKey("structuredAnalysis") && !aiAnalysis.containsKey("error")) {
+                            @SuppressWarnings("unchecked")
+                            Map<String, Object> structured = (Map<String, Object>) aiAnalysis.get("structuredAnalysis");
+                            summary.put("overallSecurityPosture", structured.getOrDefault("riskLevel", "MODERATE"));
+                            summary.put("securityPostureScore", structured.getOrDefault("securityPostureScore", 5));
+                            summary.put("aiConfidence", "HIGH");
+                        } else {
+                            // Fallback logic (same as before)
+                            if (totalEvents > 0) {
+                                double criticalEventRatio = (double) criticalEvents / totalEvents;
+                                double rejectionRate = totalRequests > 0 ? (double) totalRejections / totalRequests : 0;
 
-                    if (criticalEventRatio > 0.1 || rejectionRate > 0.5) {
-                        summary.put("overallSecurityPosture", "CONCERNING");
-                        summary.put("securityPostureScore", 3);
-                    } else if (criticalEventRatio > 0.05 || rejectionRate > 0.2) {
-                        summary.put("overallSecurityPosture", "MODERATE");
-                        summary.put("securityPostureScore", 6);
-                    } else {
-                        summary.put("overallSecurityPosture", "GOOD");
-                        summary.put("securityPostureScore", 8);
-                    }
-                } else {
-                    summary.put("overallSecurityPosture", "NO_DATA");
-                    summary.put("securityPostureScore", 5);
-                }
-                summary.put("aiConfidence", "LOW");
-            }
+                                if (criticalEventRatio > 0.1 || rejectionRate > 0.5) {
+                                    summary.put("overallSecurityPosture", "CONCERNING");
+                                    summary.put("securityPostureScore", 3);
+                                } else if (criticalEventRatio > 0.05 || rejectionRate > 0.2) {
+                                    summary.put("overallSecurityPosture", "MODERATE");
+                                    summary.put("securityPostureScore", 6);
+                                } else {
+                                    summary.put("overallSecurityPosture", "GOOD");
+                                    summary.put("securityPostureScore", 8);
+                                }
+                            } else {
+                                summary.put("overallSecurityPosture", "NO_DATA");
+                                summary.put("securityPostureScore", 5);
+                            }
+                            summary.put("aiConfidence", "LOW");
+                        }
 
-            summary.put("analysisTimestamp", LocalDateTime.now());
-            summary.put("analysisWindow", java.time.Duration.between(startDate, endDate).toHours() + " hours");
+                        summary.put("analysisTimestamp", LocalDateTime.now());
+                        summary.put("analysisWindow", java.time.Duration.between(startDate, endDate).toHours() + " hours");
+
+                        return summary;
+                    });
 
         } catch (Exception e) {
             log.error("Error generating AI-enhanced executive summary: {}", e.getMessage(), e);
-            summary.put("error", "Failed to generate AI summary");
-            summary.put("fallbackData", generateBasicSummary(startDate, endDate));
+            Map<String, Object> errorSummary = new HashMap<>();
+            errorSummary.put("error", "Failed to generate AI summary");
+            errorSummary.put("fallbackData", generateBasicSummary(startDate, endDate));
+            return Mono.just(errorSummary);
         }
-
-        return summary;
     }
 
     private Map<String, Object> generateBasicSummary(LocalDateTime startDate, LocalDateTime endDate) {

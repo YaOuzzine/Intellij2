@@ -377,13 +377,28 @@ public class ThreatAnalysisService {
 
     private void createPatternIfNotExists(String name, String type, String threatLevel,
                                           String definition, String description) {
-        if (patternRepository.findByIsActiveTrue().stream()
-                .noneMatch(p -> p.getPatternName().equals(name))) {
-            ThreatPattern pattern = new ThreatPattern(name, type, threatLevel);
-            pattern.setPatternDefinition(definition);
-            pattern.setDescription(description);
-            patternRepository.save(pattern);
-            log.info("Created default threat pattern: {}", name);
+        try {
+            List<ThreatPattern> existingPatterns = patternRepository.findByIsActiveTrue();
+            boolean patternExists = existingPatterns.stream()
+                    .anyMatch(p -> p.getPatternName().equals(name));
+
+            if (!patternExists) {
+                ThreatPattern pattern = new ThreatPattern(name, type, threatLevel);
+                pattern.setPatternDefinition(definition);
+                pattern.setDescription(description);
+                pattern.setConfidenceThreshold(0.8);
+                pattern.setIsActive(true);
+                pattern.setAutoBlock(false);
+                pattern.setTriggerCount(0L);
+                pattern.setFalsePositiveCount(0L);
+
+                patternRepository.save(pattern);
+                log.info("Created default threat pattern: {}", name);
+            } else {
+                log.debug("Threat pattern already exists: {}", name);
+            }
+        } catch (Exception e) {
+            log.error("Error creating threat pattern {}: {}", name, e.getMessage(), e);
         }
     }
 

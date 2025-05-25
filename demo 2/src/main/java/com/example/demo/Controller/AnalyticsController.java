@@ -13,6 +13,7 @@ import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import reactor.core.publisher.Mono;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
@@ -317,18 +318,19 @@ public class AnalyticsController {
      * Comprehensive security report with AI insights
      */
     @GetMapping("/reports/security")
-    public ResponseEntity<Map<String, Object>> generateSecurityReport(
+    public Mono<ResponseEntity<Map<String, Object>>> generateSecurityReport(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate) {
-        try {
-            log.info("Generating comprehensive security report from {} to {}", startDate, endDate);
-            Map<String, Object> report = analyticsService.generateSecurityReport(startDate, endDate);
-            return ResponseEntity.ok(report);
-        } catch (Exception e) {
-            log.error("Error generating security report: {}", e.getMessage(), e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", "Failed to generate security report", "message", e.getMessage()));
-        }
+
+        log.info("Generating comprehensive security report from {} to {}", startDate, endDate);
+
+        return analyticsService.generateSecurityReport(startDate, endDate)
+                .map(ResponseEntity::ok)
+                .onErrorResume(e -> {
+                    log.error("Error generating security report: {}", e.getMessage(), e);
+                    return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                            .body(Map.of("error", "Failed to generate security report", "message", e.getMessage())));
+                });
     }
 
     /**
